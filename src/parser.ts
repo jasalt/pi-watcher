@@ -25,7 +25,6 @@ export interface ParseAiMarkersOptions {
 }
 
 interface ParsedCommentLine {
-  lineNumber: number;
   commentPrefix: string;
   commentPrefixKind: string;
   text: string;
@@ -47,6 +46,17 @@ function normalizeCommentPrefix(prefix: string): string {
 
 function normalizeLine(line: string): string {
   return line.trim();
+}
+
+function makeParsedCommentLine(
+  prefix: string,
+  text: string,
+): ParsedCommentLine {
+  return {
+    commentPrefix: prefix,
+    commentPrefixKind: normalizeCommentPrefix(prefix),
+    text: normalizeLine(text),
+  };
 }
 
 function findLineComment(line: string): ParsedCommentLine | null {
@@ -80,30 +90,15 @@ function findLineComment(line: string): ParsedCommentLine | null {
     }
 
     if (char === "#") {
-      return {
-        commentPrefix: "#",
-        commentPrefixKind: "#",
-        lineNumber: 0,
-        text: normalizeLine(line.slice(i + 1)),
-      };
+      return makeParsedCommentLine("#", line.slice(i + 1));
     }
 
     if (char === "/" && line[i + 1] === "/") {
-      return {
-        commentPrefix: "//",
-        commentPrefixKind: "//",
-        lineNumber: 0,
-        text: normalizeLine(line.slice(i + 2)),
-      };
+      return makeParsedCommentLine("//", line.slice(i + 2));
     }
 
     if (char === "-" && line[i + 1] === "-") {
-      return {
-        commentPrefix: "--",
-        commentPrefixKind: "--",
-        lineNumber: 0,
-        text: normalizeLine(line.slice(i + 2)),
-      };
+      return makeParsedCommentLine("--", line.slice(i + 2));
     }
 
     if (char === ";") {
@@ -118,16 +113,23 @@ function findLineComment(line: string): ParsedCommentLine | null {
         continue;
       }
 
-      return {
-        commentPrefix: line.slice(i, j),
-        commentPrefixKind: normalizeCommentPrefix(line.slice(i, j)),
-        lineNumber: 0,
-        text: normalizeLine(line.slice(j)),
-      };
+      return makeParsedCommentLine(line.slice(i, j), line.slice(j));
     }
   }
 
   return null;
+}
+
+function markerActionFromText(markerText: string): AiMarkerAction {
+  if (markerText.endsWith("!")) {
+    return "edit";
+  }
+
+  if (markerText.endsWith("?")) {
+    return "ask";
+  }
+
+  return "context";
 }
 
 function parseMarkerToken(
@@ -135,36 +137,26 @@ function parseMarkerToken(
   markerPattern: RegExp,
 ): { markerText: string; action: AiMarkerAction } | null {
   const trimmedText = text.trim();
-  const startPattern = new RegExp(markerPattern.source, markerPattern.flags);
-  const startMatch = startPattern.exec(trimmedText);
-  const markerAtStart = startMatch?.index === 0;
+  const matcher = new RegExp(markerPattern.source, markerPattern.flags);
 
-  const endPattern = new RegExp(markerPattern.source, markerPattern.flags);
   let endMatch: RegExpExecArray | null = null;
-  let match = endPattern.exec(trimmedText);
-  while (match) {
+  for (const match of trimmedText.matchAll(matcher)) {
+    if (match.index === 0) {
+      const markerText = match[2];
+      return { markerText, action: markerActionFromText(markerText) };
+    }
+
     if (match.index + match[0].length === trimmedText.length) {
       endMatch = match;
     }
-    match = endPattern.exec(trimmedText);
   }
 
-  const markerMatch = markerAtStart ? startMatch : endMatch;
-  if (!markerMatch) {
+  if (!endMatch) {
     return null;
   }
 
-  const markerText = markerMatch[2];
-
-  if (markerText.endsWith("!")) {
-    return { markerText, action: "edit" };
-  }
-
-  if (markerText.endsWith("?")) {
-    return { markerText, action: "ask" };
-  }
-
-  return { markerText, action: "context" };
+  const markerText = endMatch[2];
+  return { markerText, action: markerActionFromText(markerText) };
 }
 
 function buildContextInput(
@@ -172,12 +164,11 @@ function buildContextInput(
   normalizedBlock: string,
   lines: string[],
 ): string {
-  const safePath = path ?? "";
   if (lines.length === 0) {
-    return `${safePath}\n${normalizedBlock}`;
+    return `${path}\n${normalizedBlock}`;
   }
 
-  return `${safePath}\n${normalizedBlock}\n${lines.join("\n")}`;
+  return `${path}\n${normalizedBlock}\n${lines.join("\n")}`;
 }
 
 export function parseAiMarkers(
@@ -188,19 +179,9 @@ export function parseAiMarkers(
   const markerWord = options.marker ?? DEFAULT_MARKER;
   const markerPattern = buildMarkerRegex(markerWord);
   const lines = source.split(/\r\n|\n|\r/);
-  const parsedLines: Array<ParsedCommentLine | null> = new Array(lines.length);
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const comment = findLineComment(lines[i]);
-    if (!comment) {
-      continue;
-    }
-
-    parsedLines[i] = {
-      ...comment,
-      lineNumber: i + 1,
-    };
-  }
+  const parsedLines: Array<ParsedCommentLine | null> = lines.map((line) =>
+    findLineComment(line),
+  );
 
   const markers: ParsedAiMarker[] = [];
 
@@ -283,8 +264,6 @@ export function parseAiMarkers(
       normalizedBlock,
       path,
     });
-
-    markerPattern.lastIndex = 0;
   }
 
   return markers;
