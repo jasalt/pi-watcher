@@ -2,7 +2,6 @@
  * Pi Watcher Extension
  *
  * M1 scaffold: register the `/watcher` command and expose config-path helpers.
- * Later milestones add auto-start, parser, router, and chokidar integration.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,6 +10,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export type WatcherConfigScope = "global" | "project";
+export type WatcherBusyPolicy = "queue_until_idle";
 export type WatcherCommand =
   | { kind: "config" }
   | { kind: "help" }
@@ -19,14 +19,61 @@ export type WatcherCommand =
 
 export interface WatcherConfig {
   enabled?: boolean;
+  scanOnStart?: boolean;
+  roots?: string[];
+  include?: string[];
+  ignore?: string[];
+  maxFileBytes?: number;
+  debounceMs?: number;
+  contextLines?: number;
+  maxPromptBytes?: number;
+  marker?: string;
+  removeHandledActionComments?: boolean;
+  removeContextAnchorsInActionBlock?: boolean;
+  busyPolicy?: WatcherBusyPolicy;
 }
 
 export interface EffectiveWatcherConfig {
   enabled: boolean;
+  scanOnStart: boolean;
+  roots: string[];
+  include: string[];
+  ignore: string[];
+  maxFileBytes: number;
+  debounceMs: number;
+  contextLines: number;
+  maxPromptBytes: number;
+  marker: string;
+  removeHandledActionComments: boolean;
+  removeContextAnchorsInActionBlock: boolean;
+  busyPolicy: WatcherBusyPolicy;
 }
+
+const DEFAULT_IGNORE: string[] = [
+  "**/.git/**",
+  "**/.jj/**",
+  "**/.pi/**",
+  "**/.agents/**",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.cache/**",
+];
 
 export const DEFAULT_CONFIG: EffectiveWatcherConfig = {
   enabled: true,
+  scanOnStart: true,
+  roots: ["."],
+  include: ["**/*"],
+  ignore: DEFAULT_IGNORE,
+  maxFileBytes: 1_048_576,
+  debounceMs: 300,
+  contextLines: 12,
+  maxPromptBytes: 60_000,
+  marker: "AI",
+  removeHandledActionComments: true,
+  removeContextAnchorsInActionBlock: false,
+  busyPolicy: "queue_until_idle",
 };
 
 const VALID_SCOPES: ReadonlySet<string> = new Set(["global", "project"]);
@@ -52,12 +99,81 @@ export function getProjectConfigPath(cwd: string): {
   return { dir, path: join(dir, "pi-watcher.json") };
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
 function normalizeConfig(record: Record<string, unknown>): WatcherConfig {
+  const config: WatcherConfig = {};
+
   if (typeof record.enabled === "boolean") {
-    return { enabled: record.enabled };
+    config.enabled = record.enabled;
   }
 
-  return {};
+  if (typeof record.scanOnStart === "boolean") {
+    config.scanOnStart = record.scanOnStart;
+  }
+
+  if (isStringArray(record.roots)) {
+    config.roots = record.roots;
+  }
+
+  if (isStringArray(record.include)) {
+    config.include = record.include;
+  }
+
+  if (isStringArray(record.ignore)) {
+    config.ignore = record.ignore;
+  }
+
+  if (
+    typeof record.maxFileBytes === "number" &&
+    Number.isFinite(record.maxFileBytes)
+  ) {
+    config.maxFileBytes = record.maxFileBytes;
+  }
+
+  if (
+    typeof record.debounceMs === "number" &&
+    Number.isFinite(record.debounceMs)
+  ) {
+    config.debounceMs = record.debounceMs;
+  }
+
+  if (
+    typeof record.contextLines === "number" &&
+    Number.isFinite(record.contextLines)
+  ) {
+    config.contextLines = record.contextLines;
+  }
+
+  if (
+    typeof record.maxPromptBytes === "number" &&
+    Number.isFinite(record.maxPromptBytes)
+  ) {
+    config.maxPromptBytes = record.maxPromptBytes;
+  }
+
+  if (typeof record.marker === "string") {
+    config.marker = record.marker;
+  }
+
+  if (typeof record.removeHandledActionComments === "boolean") {
+    config.removeHandledActionComments = record.removeHandledActionComments;
+  }
+
+  if (typeof record.removeContextAnchorsInActionBlock === "boolean") {
+    config.removeContextAnchorsInActionBlock =
+      record.removeContextAnchorsInActionBlock;
+  }
+
+  if (record.busyPolicy === "queue_until_idle") {
+    config.busyPolicy = record.busyPolicy;
+  }
+
+  return config;
 }
 
 export function loadConfigFromPath(configPath: string): WatcherConfig {
@@ -85,8 +201,9 @@ export function resolveEffectiveConfig(
   projectConfig: WatcherConfig = {},
 ): EffectiveWatcherConfig {
   return {
-    enabled:
-      projectConfig.enabled ?? globalConfig.enabled ?? DEFAULT_CONFIG.enabled,
+    ...DEFAULT_CONFIG,
+    ...normalizeConfig(globalConfig as Record<string, unknown>),
+    ...normalizeConfig(projectConfig as Record<string, unknown>),
   };
 }
 
@@ -108,6 +225,20 @@ function saveConfigToPath(
   } catch (error) {
     return String(error);
   }
+}
+
+function setWatcherRuntimeStatus(
+  ctx: {
+    hasUI: boolean;
+    ui: { setStatus: (key: string, text: string | undefined) => void };
+  },
+  enabled: boolean,
+): void {
+  if (!ctx.hasUI) {
+    return;
+  }
+
+  ctx.ui.setStatus("pi-watcher", `watcher ${enabled ? "on" : "off"}`);
 }
 
 export function parseWatcherArgs(args: string): WatcherCommand {
@@ -151,18 +282,22 @@ function loadEffectiveConfig(cwd: string): EffectiveWatcherConfig {
   );
 }
 
-export function formatWatcherStatus(cwd: string): string {
+export function formatWatcherStatus(
+  cwd: string,
+  runtimeEnabled?: boolean,
+): string {
   const globalPath = getGlobalConfigPath().path;
   const projectPath = getProjectConfigPath(cwd).path;
   const config = loadEffectiveConfig(cwd);
   const state = config.enabled ? "enabled" : "disabled";
+  const runtimeState = runtimeEnabled ?? config.enabled;
 
   return [
     `pi-watcher: ${state}`,
     `cwd: ${cwd}`,
     `global config: ${globalPath}`,
     `project config: ${projectPath}`,
-    "runtime: scaffold-only; file watching lands in M6",
+    `runtime: watcher ${runtimeState ? "on" : "off"}`,
   ].join("\n");
 }
 
@@ -184,10 +319,18 @@ function publishMessage(
 }
 
 export default function piWatcherExtension(pi: ExtensionAPI): void {
+  let runtimeEnabled = false;
+
   pi.on("session_start", async (_event, ctx) => {
-    if (ctx.hasUI) {
-      ctx.ui.setStatus("pi-watcher", "watcher scaffold");
-    }
+    const effectiveConfig = loadEffectiveConfig(ctx.cwd);
+    runtimeEnabled = effectiveConfig.enabled;
+
+    setWatcherRuntimeStatus(ctx, runtimeEnabled);
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    runtimeEnabled = false;
+    setWatcherRuntimeStatus(ctx, runtimeEnabled);
   });
 
   pi.registerCommand("watcher", {
@@ -230,6 +373,10 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
           return;
         }
 
+        const effectiveConfig = loadEffectiveConfig(ctx.cwd);
+        runtimeEnabled = effectiveConfig.enabled;
+        setWatcherRuntimeStatus(ctx, runtimeEnabled);
+
         publishMessage(
           ctx,
           `pi-watcher ${command.scope} config set to enabled=${command.enabled}`,
@@ -237,7 +384,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      publishMessage(ctx, formatWatcherStatus(ctx.cwd));
+      publishMessage(ctx, formatWatcherStatus(ctx.cwd, runtimeEnabled));
     },
   });
 }
