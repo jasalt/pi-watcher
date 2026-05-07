@@ -33,7 +33,13 @@ export interface WatcherConfig {
   busyPolicy?: WatcherBusyPolicy;
 }
 
+export { buildWatcherPrompt } from "./prompt";
 export { parseAiMarkers } from "./parser";
+export type {
+  BuildWatcherPromptOptions,
+  BuiltWatcherPrompt,
+  WatcherFileState,
+} from "./prompt";
 export type {
   AiMarkerAction,
   AiMarkerBlock,
