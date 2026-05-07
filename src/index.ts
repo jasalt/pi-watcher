@@ -33,6 +33,14 @@ export interface WatcherConfig {
   busyPolicy?: WatcherBusyPolicy;
 }
 
+export { parseAiMarkers } from "./parser";
+export type {
+  AiMarkerAction,
+  AiMarkerBlock,
+  ParsedAiMarker,
+  ParseAiMarkersOptions,
+} from "./parser";
+
 export type EffectiveWatcherConfig = Required<WatcherConfig>;
 
 const DEFAULT_IGNORE: string[] = [
