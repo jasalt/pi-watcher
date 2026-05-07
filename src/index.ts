@@ -33,21 +33,7 @@ export interface WatcherConfig {
   busyPolicy?: WatcherBusyPolicy;
 }
 
-export interface EffectiveWatcherConfig {
-  enabled: boolean;
-  scanOnStart: boolean;
-  roots: string[];
-  include: string[];
-  ignore: string[];
-  maxFileBytes: number;
-  debounceMs: number;
-  contextLines: number;
-  maxPromptBytes: number;
-  marker: string;
-  removeHandledActionComments: boolean;
-  removeContextAnchorsInActionBlock: boolean;
-  busyPolicy: WatcherBusyPolicy;
-}
+export type EffectiveWatcherConfig = Required<WatcherConfig>;
 
 const DEFAULT_IGNORE: string[] = [
   "**/.git/**",
@@ -75,6 +61,20 @@ export const DEFAULT_CONFIG: EffectiveWatcherConfig = {
   removeContextAnchorsInActionBlock: false,
   busyPolicy: "queue_until_idle",
 };
+
+const BOOLEAN_CONFIG_KEYS = [
+  "enabled",
+  "scanOnStart",
+  "removeHandledActionComments",
+  "removeContextAnchorsInActionBlock",
+] as const;
+const NUMBER_CONFIG_KEYS = [
+  "maxFileBytes",
+  "debounceMs",
+  "contextLines",
+  "maxPromptBytes",
+] as const;
+const STRING_ARRAY_CONFIG_KEYS = ["roots", "include", "ignore"] as const;
 
 const VALID_SCOPES: ReadonlySet<string> = new Set(["global", "project"]);
 const WATCHER_HELP = [
@@ -108,65 +108,29 @@ function isStringArray(value: unknown): value is string[] {
 function normalizeConfig(record: Record<string, unknown>): WatcherConfig {
   const config: WatcherConfig = {};
 
-  if (typeof record.enabled === "boolean") {
-    config.enabled = record.enabled;
+  for (const key of BOOLEAN_CONFIG_KEYS) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      config[key] = value;
+    }
   }
 
-  if (typeof record.scanOnStart === "boolean") {
-    config.scanOnStart = record.scanOnStart;
+  for (const key of NUMBER_CONFIG_KEYS) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      config[key] = value;
+    }
   }
 
-  if (isStringArray(record.roots)) {
-    config.roots = record.roots;
-  }
-
-  if (isStringArray(record.include)) {
-    config.include = record.include;
-  }
-
-  if (isStringArray(record.ignore)) {
-    config.ignore = record.ignore;
-  }
-
-  if (
-    typeof record.maxFileBytes === "number" &&
-    Number.isFinite(record.maxFileBytes)
-  ) {
-    config.maxFileBytes = record.maxFileBytes;
-  }
-
-  if (
-    typeof record.debounceMs === "number" &&
-    Number.isFinite(record.debounceMs)
-  ) {
-    config.debounceMs = record.debounceMs;
-  }
-
-  if (
-    typeof record.contextLines === "number" &&
-    Number.isFinite(record.contextLines)
-  ) {
-    config.contextLines = record.contextLines;
-  }
-
-  if (
-    typeof record.maxPromptBytes === "number" &&
-    Number.isFinite(record.maxPromptBytes)
-  ) {
-    config.maxPromptBytes = record.maxPromptBytes;
+  for (const key of STRING_ARRAY_CONFIG_KEYS) {
+    const value = record[key];
+    if (isStringArray(value)) {
+      config[key] = value;
+    }
   }
 
   if (typeof record.marker === "string") {
     config.marker = record.marker;
-  }
-
-  if (typeof record.removeHandledActionComments === "boolean") {
-    config.removeHandledActionComments = record.removeHandledActionComments;
-  }
-
-  if (typeof record.removeContextAnchorsInActionBlock === "boolean") {
-    config.removeContextAnchorsInActionBlock =
-      record.removeContextAnchorsInActionBlock;
   }
 
   if (record.busyPolicy === "queue_until_idle") {
