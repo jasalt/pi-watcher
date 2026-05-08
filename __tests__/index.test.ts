@@ -37,6 +37,19 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error("Timed out waiting for watcher integration event");
+    }
+    await sleep(20);
+  }
+}
+
 type CapturedCommand = {
   handler: (args: string, ctx: MockContext) => Promise<void>;
 };
@@ -249,5 +262,121 @@ describe("pi-watcher scaffold", () => {
 
     expect(statuses).toContain("pi-watcher:watcher off");
     expect(harness.sent).toHaveLength(0);
+  });
+
+  it("auto-starts and dispatches saved AI! comments without /watcher start", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.emit("session_start", ctx);
+      writeFileSync(join(cwd, "sample.ts"), "// handle null AI!\nrun();\n");
+
+      await waitFor(() => harness.sent.length === 1);
+
+      expect(harness.sent[0]).toContain("sample.ts:1 action=edit");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("persists /watcher stop and start while toggling live dispatch", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.emit("session_start", ctx);
+      const stoppedPath = join(cwd, "stopped.ts");
+      await harness.command.handler("stop", ctx);
+      writeFileSync(stoppedPath, "// should not run AI!\n");
+      await sleep(150);
+
+      expect(
+        JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
+      ).toEqual({
+        enabled: false,
+      });
+      expect(harness.sent).toHaveLength(0);
+
+      writeFileSync(stoppedPath, "export const stopped = true;\n");
+      await harness.command.handler("start", ctx);
+      writeFileSync(join(cwd, "started.ts"), "// run now AI!\n");
+      await waitFor(() => harness.sent.length === 1);
+
+      expect(
+        JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
+      ).toEqual({
+        enabled: true,
+      });
+      expect(harness.sent[0]).toContain("started.ts:1 action=edit");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("does not repeat an unchanged AI! comment after agent_end even if nearby code changes", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "loop.ts");
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.emit("session_start", ctx);
+      writeFileSync(path, "// add guard AI!\nexport const value = 1;\n");
+      await waitFor(() => harness.sent.length === 1);
+
+      await harness.emit("agent_end", ctx);
+      writeFileSync(
+        path,
+        "// add guard AI!\nexport const value = 2;\nexport const other = 3;\n",
+      );
+      await sleep(150);
+
+      expect(harness.sent).toHaveLength(1);
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("dispatches AI? comments as answer-only prompts", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.emit("session_start", ctx);
+      writeFileSync(join(cwd, "question.py"), "# why not use sum AI?\n");
+
+      await waitFor(() => harness.sent.length === 1);
+
+      expect(harness.sent[0]).toContain(
+        "Answer the AI? comments. Do not edit files unless a comment explicitly asks for edits.",
+      );
+      expect(harness.sent[0]).toContain("question.py:1 action=ask");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
   });
 });
