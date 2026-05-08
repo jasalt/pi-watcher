@@ -33,6 +33,10 @@ function writeProjectConfig(
   writeFileSync(projectPath.path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 type CapturedCommand = {
   handler: (args: string, ctx: MockContext) => Promise<void>;
 };
@@ -75,14 +79,17 @@ function createMockContext(cwd: string): {
 function createExtensionHarness(): {
   command: CapturedCommand;
   emit: (event: string, ctx: MockContext) => Promise<void>;
+  sent: string[];
 } {
   const handlers = new Map<
     string,
     (event: Record<string, never>, ctx: MockContext) => Promise<void> | void
   >();
+  const sent: string[] = [];
   let command: CapturedCommand | undefined;
 
   piWatcherExtension({
+    appendEntry: () => undefined,
     on: (event: string, handler: unknown) => {
       handlers.set(
         event,
@@ -97,6 +104,9 @@ function createExtensionHarness(): {
         command = options;
       }
     },
+    sendUserMessage: (prompt: string) => {
+      sent.push(prompt);
+    },
   } as never);
 
   if (!command) {
@@ -108,6 +118,7 @@ function createExtensionHarness(): {
     emit: async (event, ctx) => {
       await handlers.get(event)?.({}, ctx);
     },
+    sent,
   };
 }
 
@@ -184,6 +195,7 @@ describe("pi-watcher scaffold", () => {
     await harness.emit("session_start", ctx);
 
     expect(statuses).toContain("pi-watcher:watcher on");
+    await harness.emit("session_shutdown", ctx);
   });
 
   it("stays off on session_start when project config disables watcher", async () => {
@@ -195,6 +207,7 @@ describe("pi-watcher scaffold", () => {
     await harness.emit("session_start", ctx);
 
     expect(statuses).toContain("pi-watcher:watcher off");
+    await harness.emit("session_shutdown", ctx);
   });
 
   it("start and stop update project config and runtime state", async () => {
@@ -217,5 +230,24 @@ describe("pi-watcher scaffold", () => {
       enabled: false,
     });
     expect(statuses).toContain("pi-watcher:watcher off");
+  });
+
+  it("closes the running watcher on session_shutdown", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    const harness = createExtensionHarness();
+    const { ctx, statuses } = createMockContext(cwd);
+
+    await harness.emit("session_start", ctx);
+    await harness.emit("session_shutdown", ctx);
+    writeFileSync(join(cwd, "after-shutdown.ts"), "// no dispatch AI!\n");
+    await sleep(150);
+
+    expect(statuses).toContain("pi-watcher:watcher off");
+    expect(harness.sent).toHaveLength(0);
   });
 });

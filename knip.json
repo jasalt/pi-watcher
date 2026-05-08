@@ -6,11 +6,5 @@
     "vitest.config.llm.ts"
   ],
   "project": ["src/**/*.ts"],
-  "ignoreDependencies": [
-    "@biomejs/biome",
-    "chokidar",
-    "ignore",
-    "jscpd",
-    "minimatch"
-  ]
+  "ignoreDependencies": ["@biomejs/biome", "jscpd"]
 }

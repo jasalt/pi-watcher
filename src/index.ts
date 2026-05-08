@@ -8,7 +8,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { WatcherRouter, type WatcherRouterResult } from "./router";
+import {
+  type WatcherAgentContext,
+  WatcherRouter,
+  type WatcherRouterResult,
+} from "./router";
+import { PiFileWatcher } from "./watcher";
 
 export type WatcherConfigScope = "global" | "project";
 export type WatcherBusyPolicy = "queue_until_idle";
@@ -17,6 +22,7 @@ export type WatcherCommand =
   | { kind: "config" }
   | { kind: "help" }
   | { kind: "retry" }
+  | { kind: "scan" }
   | { kind: "status" }
   | { enabled: boolean; kind: "setEnabled"; scope: WatcherConfigScope };
 export interface WatcherConfig {
@@ -36,6 +42,7 @@ export interface WatcherConfig {
 }
 
 export { WatcherRouter } from "./router";
+export { PiFileWatcher } from "./watcher";
 export { buildWatcherPrompt } from "./prompt";
 export type {
   WatcherAgentContext,
@@ -122,6 +129,7 @@ const WATCHER_HELP = [
   "/watcher stop                disable watcher in project config",
   "/watcher clear               clear pending queue + processed marker ledger",
   "/watcher retry               retry last suppressed marker batch",
+  "/watcher scan                scan roots now for AI comments",
   "/watcher global start|stop   update global config",
   "/watcher project start|stop  update project config",
 ].join("\n");
@@ -256,8 +264,11 @@ export function parseWatcherArgs(args: string): WatcherCommand {
     return { kind: "config" };
   }
 
-  if (parts.length === 1 && (parts[0] === "clear" || parts[0] === "retry")) {
-    return { kind: parts[0] as "clear" | "retry" };
+  if (
+    parts.length === 1 &&
+    (parts[0] === "clear" || parts[0] === "retry" || parts[0] === "scan")
+  ) {
+    return { kind: parts[0] as "clear" | "retry" | "scan" };
   }
 
   if (parts.length === 1 && (parts[0] === "start" || parts[0] === "stop")) {
@@ -342,18 +353,137 @@ function publishMessage(
   console.log(message);
 }
 
+function publishWarning(
+  ctx: {
+    hasUI: boolean;
+    ui: {
+      notify: (message: string, level?: "error" | "info" | "warning") => void;
+    };
+  },
+  message: string,
+): void {
+  if (ctx.hasUI) {
+    ctx.ui.notify(message, "warning");
+    return;
+  }
+
+  console.warn(message);
+}
+
+type WatcherExtensionContext = WatcherAgentContext & {
+  cwd: string;
+  hasUI: boolean;
+  ui: {
+    notify: (message: string, level?: "error" | "info" | "warning") => void;
+    setStatus: (key: string, text: string | undefined) => void;
+  };
+};
+
 export default function piWatcherExtension(pi: ExtensionAPI): void {
   const router = new WatcherRouter(pi);
   let runtimeEnabled = false;
+  let fileWatcher: PiFileWatcher | null = null;
+
+  function createRuntimeWatcher(
+    ctx: WatcherExtensionContext,
+    effectiveConfig: EffectiveWatcherConfig,
+  ): PiFileWatcher {
+    return new PiFileWatcher({
+      cwd: ctx.cwd,
+      debounceMs: effectiveConfig.debounceMs,
+      ignore: effectiveConfig.ignore,
+      include: effectiveConfig.include,
+      marker: effectiveConfig.marker,
+      maxFileBytes: effectiveConfig.maxFileBytes,
+      onBatch: (batch) => {
+        router.enqueueBatch(batch, ctx, {
+          contextLines: effectiveConfig.contextLines,
+          maxPromptBytes: effectiveConfig.maxPromptBytes,
+        });
+      },
+      onError: (error) => {
+        publishWarning(ctx, `pi-watcher file watcher error: ${String(error)}`);
+      },
+      roots: effectiveConfig.roots,
+    });
+  }
+
+  async function closeRuntimeWatcher(): Promise<void> {
+    const watcher = fileWatcher;
+    fileWatcher = null;
+
+    if (watcher) {
+      await watcher.close();
+    }
+  }
+
+  async function startRuntimeWatcher(
+    ctx: WatcherExtensionContext,
+    effectiveConfig: EffectiveWatcherConfig,
+    scanReason: string | null,
+  ): Promise<void> {
+    await closeRuntimeWatcher();
+    const watcher = createRuntimeWatcher(ctx, effectiveConfig);
+    fileWatcher = watcher;
+    await watcher.start();
+
+    if (fileWatcher !== watcher || watcher.isClosed()) {
+      return;
+    }
+
+    runtimeEnabled = true;
+    setWatcherRuntimeStatus(ctx, true);
+
+    if (scanReason) {
+      await watcher.scan(scanReason);
+    }
+  }
+
+  async function applyEffectiveConfig(
+    ctx: WatcherExtensionContext,
+    effectiveConfig: EffectiveWatcherConfig,
+  ): Promise<void> {
+    try {
+      if (!effectiveConfig.enabled) {
+        await closeRuntimeWatcher();
+        runtimeEnabled = false;
+        setWatcherRuntimeStatus(ctx, false);
+        return;
+      }
+
+      await startRuntimeWatcher(
+        ctx,
+        effectiveConfig,
+        effectiveConfig.scanOnStart ? "startup_scan" : null,
+      );
+    } catch (error) {
+      await closeRuntimeWatcher();
+      runtimeEnabled = false;
+      setWatcherRuntimeStatus(ctx, false);
+      publishWarning(ctx, `Failed to start pi-watcher: ${String(error)}`);
+    }
+  }
+
+  async function scanRuntimeWatcher(
+    ctx: WatcherExtensionContext,
+    effectiveConfig: EffectiveWatcherConfig,
+  ): Promise<boolean> {
+    const watcher = fileWatcher ?? createRuntimeWatcher(ctx, effectiveConfig);
+    const batch = await watcher.scan("manual_scan");
+
+    if (!fileWatcher) {
+      await watcher.close();
+    }
+
+    return batch !== null;
+  }
 
   pi.on("session_start", async (_event, ctx) => {
-    const effectiveConfig = loadEffectiveConfig(ctx.cwd);
-    runtimeEnabled = effectiveConfig.enabled;
-
-    setWatcherRuntimeStatus(ctx, runtimeEnabled);
+    await applyEffectiveConfig(ctx, loadEffectiveConfig(ctx.cwd));
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    await closeRuntimeWatcher();
     runtimeEnabled = false;
     setWatcherRuntimeStatus(ctx, runtimeEnabled);
   });
@@ -372,6 +502,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         "stop",
         "clear",
         "retry",
+        "scan",
         "global start",
         "global stop",
         "project start",
@@ -409,6 +540,20 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      if (command.kind === "scan") {
+        const didDispatch = await scanRuntimeWatcher(
+          ctx,
+          loadEffectiveConfig(ctx.cwd),
+        );
+        publishMessage(
+          ctx,
+          didDispatch
+            ? "pi-watcher scan: actionable markers dispatched or queued"
+            : "pi-watcher scan: no actionable markers found",
+        );
+        return;
+      }
+
       if (command.kind === "setEnabled") {
         const configPath = getConfigPathForScope(command.scope, ctx.cwd);
         const saveError = saveConfigToPath(configPath.path, {
@@ -416,16 +561,15 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         });
 
         if (saveError) {
-          ctx.ui.notify(
+          publishWarning(
+            ctx,
             `Failed to save pi-watcher ${command.scope} config: ${saveError}`,
-            "warning",
           );
           return;
         }
 
         const effectiveConfig = loadEffectiveConfig(ctx.cwd);
-        runtimeEnabled = effectiveConfig.enabled;
-        setWatcherRuntimeStatus(ctx, runtimeEnabled);
+        await applyEffectiveConfig(ctx, effectiveConfig);
 
         publishMessage(
           ctx,
