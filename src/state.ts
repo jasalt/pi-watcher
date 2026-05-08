@@ -40,22 +40,25 @@ export function createMarkerContextId(marker: ParsedAiMarker): string {
   return sha256(marker.markerContextInput);
 }
 
+function isActionableMarker(marker: ParsedAiMarker): boolean {
+  return marker.action !== "context";
+}
+
+function hasActionableMarkers(files: WatcherFileState[]): boolean {
+  return files.some((file) => file.markers.some(isActionableMarker));
+}
+
 function actionableMarkerIds(markers: ParsedAiMarker[]): string[] {
-  return markers
-    .filter((marker) => marker.action !== "context")
-    .map(createMarkerIntentId);
+  return markers.filter(isActionableMarker).map(createMarkerIntentId);
 }
 
 function rememberProcessedMarkerId(
   state: WatcherState,
   markerId: string,
 ): void {
-  if (state.processedMarkerIntentIds.has(markerId)) {
-    state.processedMarkerIntentOrder = state.processedMarkerIntentOrder.filter(
-      (id) => id !== markerId,
-    );
-  }
-
+  state.processedMarkerIntentOrder = state.processedMarkerIntentOrder.filter(
+    (id) => id !== markerId,
+  );
   state.processedMarkerIntentIds.add(markerId);
   state.processedMarkerIntentOrder.push(markerId);
 
@@ -85,12 +88,13 @@ export function clearProcessedMarkerIds(
   state: WatcherState,
   markerIds: string[],
 ): void {
-  for (const id of markerIds) {
+  const markerIdSet = new Set(markerIds);
+  for (const id of markerIdSet) {
     state.processedMarkerIntentIds.delete(id);
   }
 
   state.processedMarkerIntentOrder = state.processedMarkerIntentOrder.filter(
-    (id) => !markerIds.includes(id),
+    (id) => !markerIdSet.has(id),
   );
 }
 
@@ -103,40 +107,26 @@ export function filterBatchForDispatch(
   state: WatcherState,
   batch: WatcherBatch,
 ): WatcherBatch | null {
-  const inFlightIds = new Set(state.inFlight?.markerIds ?? []);
+  const suppressedIds = new Set([
+    ...state.processedMarkerIntentIds,
+    ...(state.inFlight?.markerIds ?? []),
+  ]);
   const files = batch.files
-    .map((file) => {
-      const markers = file.markers.filter((marker) => {
-        if (marker.action === "context") {
-          return true;
-        }
-
-        const markerId = createMarkerIntentId(marker);
-        return (
-          !state.processedMarkerIntentIds.has(markerId) &&
-          !inFlightIds.has(markerId)
-        );
-      });
-
-      return {
-        ...file,
-        markers,
-      };
-    })
+    .map((file) => ({
+      ...file,
+      markers: file.markers.filter(
+        (marker) =>
+          !isActionableMarker(marker) ||
+          !suppressedIds.has(createMarkerIntentId(marker)),
+      ),
+    }))
     .filter((file) => file.markers.length > 0);
 
-  const hasActionable = files.some((file) =>
-    file.markers.some((marker) => marker.action !== "context"),
-  );
-
-  if (!hasActionable) {
+  if (!hasActionableMarkers(files)) {
     return null;
   }
 
-  return {
-    files,
-    reason: batch.reason,
-  };
+  return { ...batch, files };
 }
 
 export function markBatchInFlight(

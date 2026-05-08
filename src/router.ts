@@ -1,10 +1,5 @@
 import type { ParsedAiMarker } from "./parser";
-import {
-  type BuildWatcherPromptOptions,
-  type BuiltWatcherPrompt,
-  type WatcherFileState,
-  buildWatcherPrompt,
-} from "./prompt";
+import { type BuildWatcherPromptOptions, buildWatcherPrompt } from "./prompt";
 import {
   PI_WATCHER_STATE_ENTRY_TYPE,
   type WatcherBatch,
@@ -55,22 +50,22 @@ interface WatcherRouterApi {
   sendUserMessage: (prompt: string) => void;
 }
 
+function isActionableMarker(marker: ParsedAiMarker): boolean {
+  return marker.action !== "context";
+}
+
 function collectActionableMarkers(markers: ParsedAiMarker[]): ParsedAiMarker[] {
-  return markers.filter((marker) => marker.action !== "context");
+  return markers.filter(isActionableMarker);
 }
 
 function countActionableMarkers(batch: WatcherBatch): number {
-  return batch.files.reduce(
-    (count, file) =>
-      count +
-      file.markers.filter((marker) => marker.action !== "context").length,
-    0,
-  );
+  return batch.files.flatMap((file) => file.markers).filter(isActionableMarker)
+    .length;
 }
 
 function countQueuedMarkers(queue: QueuedBatch[]): number {
   return queue.reduce(
-    (count, item) => count + countActionableMarkers(item.promptBatch),
+    (count, { promptBatch }) => count + countActionableMarkers(promptBatch),
     0,
   );
 }
@@ -104,14 +99,11 @@ export class WatcherRouter {
   }
 
   enqueueBatch(
-    batch: { files: WatcherFileState[]; reason: string },
+    batch: WatcherBatch,
     context: WatcherAgentContext,
     options?: BuildWatcherPromptOptions,
   ): WatcherRouterResult {
-    const filteredBatch = filterBatchForDispatch(this.state, {
-      files: batch.files,
-      reason: batch.reason,
-    });
+    const filteredBatch = filterBatchForDispatch(this.state, batch);
 
     if (!filteredBatch) {
       return { status: "suppressed" };
@@ -132,10 +124,7 @@ export class WatcherRouter {
     const completed = completeInFlightBatch(this.state);
 
     if (completed) {
-      this.lastCompleted = {
-        batch: completed.batch,
-        markerIds: completed.markerIds,
-      };
+      this.lastCompleted = completed;
     }
 
     if (this.queue.length > 0) {
@@ -177,18 +166,11 @@ export class WatcherRouter {
     return this.snapshot();
   }
 
-  private buildPrompt(
-    batch: WatcherBatch,
-    options?: BuildWatcherPromptOptions,
-  ): BuiltWatcherPrompt | null {
-    return buildWatcherPrompt(batch.files, options);
-  }
-
   private dispatchFilteredBatch(
     batch: WatcherBatch,
     options?: BuildWatcherPromptOptions,
   ): WatcherRouterResult {
-    const prompt = this.buildPrompt(batch, options);
+    const prompt = buildWatcherPrompt(batch.files, options);
     if (!prompt) {
       return { status: "suppressed" };
     }

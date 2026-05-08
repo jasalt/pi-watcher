@@ -320,54 +320,40 @@ export function formatWatcherStatus(
   ].join("\n");
 }
 
-function formatRouterResult(
-  action: "retry",
-  result: WatcherRouterResult,
-): string {
+function formatRetryResult(result: WatcherRouterResult): string {
   switch (result.status) {
     case "dispatched":
-      return `pi-watcher ${action}: dispatched last marker batch`;
+      return "pi-watcher retry: dispatched last marker batch";
     case "queued":
-      return `pi-watcher ${action}: queued last marker batch until pi is idle`;
+      return "pi-watcher retry: queued last marker batch until pi is idle";
     case "suppressed":
-      return `pi-watcher ${action}: nothing to retry`;
+      return "pi-watcher retry: nothing to retry";
     case "completed":
-      return `pi-watcher ${action}: no pending work`;
+      return "pi-watcher retry: no pending work";
   }
 }
+
+type WatcherNotificationLevel = "error" | "info" | "warning";
+
+type WatcherNotifyContext = {
+  hasUI: boolean;
+  ui: {
+    notify: (message: string, level?: WatcherNotificationLevel) => void;
+  };
+};
 
 function publishMessage(
-  ctx: {
-    hasUI: boolean;
-    ui: {
-      notify: (message: string, level?: "error" | "info" | "warning") => void;
-    };
-  },
+  ctx: WatcherNotifyContext,
   message: string,
+  level: WatcherNotificationLevel = "info",
 ): void {
   if (ctx.hasUI) {
-    ctx.ui.notify(message, "info");
+    ctx.ui.notify(message, level);
     return;
   }
 
-  console.log(message);
-}
-
-function publishWarning(
-  ctx: {
-    hasUI: boolean;
-    ui: {
-      notify: (message: string, level?: "error" | "info" | "warning") => void;
-    };
-  },
-  message: string,
-): void {
-  if (ctx.hasUI) {
-    ctx.ui.notify(message, "warning");
-    return;
-  }
-
-  console.warn(message);
+  const log = level === "warning" ? console.warn : console.log;
+  log(message);
 }
 
 type WatcherExtensionContext = WatcherAgentContext & {
@@ -402,7 +388,11 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         });
       },
       onError: (error) => {
-        publishWarning(ctx, `pi-watcher file watcher error: ${String(error)}`);
+        publishMessage(
+          ctx,
+          `pi-watcher file watcher error: ${String(error)}`,
+          "warning",
+        );
       },
       roots: effectiveConfig.roots,
     });
@@ -460,7 +450,11 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
       await closeRuntimeWatcher();
       runtimeEnabled = false;
       setWatcherRuntimeStatus(ctx, false);
-      publishWarning(ctx, `Failed to start pi-watcher: ${String(error)}`);
+      publishMessage(
+        ctx,
+        `Failed to start pi-watcher: ${String(error)}`,
+        "warning",
+      );
     }
   }
 
@@ -536,7 +530,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
           contextLines: effectiveConfig.contextLines,
           maxPromptBytes: effectiveConfig.maxPromptBytes,
         });
-        publishMessage(ctx, formatRouterResult("retry", result));
+        publishMessage(ctx, formatRetryResult(result));
         return;
       }
 
@@ -561,9 +555,10 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         });
 
         if (saveError) {
-          publishWarning(
+          publishMessage(
             ctx,
             `Failed to save pi-watcher ${command.scope} config: ${saveError}`,
+            "warning",
           );
           return;
         }

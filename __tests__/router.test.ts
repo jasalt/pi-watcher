@@ -20,7 +20,7 @@ function createRouterHarness(
   options: { idle?: boolean; pending?: boolean } = {},
 ) {
   let idle = options.idle ?? true;
-  let pending = options.pending ?? false;
+  const pending = options.pending ?? false;
   const sent: string[] = [];
   const entries: Array<{ data: unknown; type: string }> = [];
   const router = new WatcherRouter({
@@ -38,9 +38,6 @@ function createRouterHarness(
     sent,
     setIdle: (value: boolean) => {
       idle = value;
-    },
-    setPending: (value: boolean) => {
-      pending = value;
     },
   };
 }

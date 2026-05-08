@@ -10,10 +10,14 @@ import {
   markBatchInFlight,
 } from "../src/state";
 
+function markersFor(path: string, content: string) {
+  return parseAiMarkers(content, { path });
+}
+
 function fileState(path: string, content: string) {
   return {
     content,
-    markers: parseAiMarkers(content, { path }),
+    markers: markersFor(path, content),
     path,
   };
 }
@@ -21,12 +25,14 @@ function fileState(path: string, content: string) {
 describe("watcher state", () => {
   it("uses line-shift-stable intent ids and context-sensitive diagnostic ids", () => {
     // [ref:marker_intent_suppression]
-    const markerA = parseAiMarkers("// fix thing AI!\nconst x = 1;", {
-      path: "src/foo.ts",
-    })[0];
-    const markerB = parseAiMarkers("\n\n// fix thing AI!\nconst x = 2;", {
-      path: "src/foo.ts",
-    })[0];
+    const [markerA] = markersFor(
+      "src/foo.ts",
+      "// fix thing AI!\nconst x = 1;",
+    );
+    const [markerB] = markersFor(
+      "src/foo.ts",
+      "\n\n// fix thing AI!\nconst x = 2;",
+    );
 
     expect(createMarkerIntentId(markerB)).toBe(createMarkerIntentId(markerA));
     expect(createMarkerContextId(markerB)).not.toBe(
