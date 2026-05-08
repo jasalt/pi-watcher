@@ -33,6 +33,18 @@ function writeProjectConfig(
   writeFileSync(projectPath.path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
+function writeLiveProjectConfig(cwd: string): void {
+  writeProjectConfig(cwd, {
+    debounceMs: 20,
+    enabled: true,
+    scanOnStart: false,
+  });
+}
+
+function readProjectConfig(cwd: string): unknown {
+  return JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8"));
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -71,13 +83,9 @@ function createMockContext(
   options: { hasUI?: boolean; idle?: boolean; throwOnUi?: boolean } = {},
 ): {
   ctx: MockContext;
-  notifications: string[];
-  setIdle: (value: boolean) => void;
   statuses: string[];
   widgets: string[];
 } {
-  let idle = options.idle ?? true;
-  const notifications: string[] = [];
   const statuses: string[] = [];
   const widgets: string[] = [];
   const maybeThrow = () => {
@@ -91,11 +99,10 @@ function createMockContext(
       cwd,
       hasPendingMessages: () => false,
       hasUI: options.hasUI ?? true,
-      isIdle: () => idle,
+      isIdle: () => options.idle ?? true,
       ui: {
-        notify: (message) => {
+        notify: () => {
           maybeThrow();
-          notifications.push(message);
         },
         setStatus: (key, text) => {
           maybeThrow();
@@ -106,10 +113,6 @@ function createMockContext(
           widgets.push(`${key}:${lines?.join("|") ?? ""}`);
         },
       },
-    },
-    notifications,
-    setIdle: (value) => {
-      idle = value;
     },
     statuses,
     widgets,
@@ -259,17 +262,13 @@ describe("pi-watcher scaffold", () => {
     const { ctx, statuses } = createMockContext(cwd);
 
     await harness.command.handler("start", ctx);
-    expect(
-      JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
-    ).toEqual({
+    expect(readProjectConfig(cwd)).toEqual({
       enabled: true,
     });
     expect(statuses).toContain("pi-watcher:watcher on");
 
     await harness.command.handler("stop", ctx);
-    expect(
-      JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
-    ).toEqual({
+    expect(readProjectConfig(cwd)).toEqual({
       enabled: false,
     });
     expect(statuses).toContain("pi-watcher:watcher off");
@@ -277,11 +276,7 @@ describe("pi-watcher scaffold", () => {
 
   it("closes the running watcher on session_shutdown", async () => {
     const cwd = makeTempProject();
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     const harness = createExtensionHarness();
     const { ctx, statuses } = createMockContext(cwd);
 
@@ -296,11 +291,7 @@ describe("pi-watcher scaffold", () => {
 
   it("auto-starts and dispatches saved AI! comments without /watcher start", async () => {
     const cwd = makeTempProject();
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
@@ -319,11 +310,7 @@ describe("pi-watcher scaffold", () => {
 
   it("persists /watcher stop and start while toggling live dispatch", async () => {
     const cwd = makeTempProject();
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
@@ -334,9 +321,7 @@ describe("pi-watcher scaffold", () => {
       writeFileSync(stoppedPath, "// should not run AI!\n");
       await sleep(150);
 
-      expect(
-        JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
-      ).toEqual({
+      expect(readProjectConfig(cwd)).toEqual({
         enabled: false,
       });
       expect(harness.sent).toHaveLength(0);
@@ -346,9 +331,7 @@ describe("pi-watcher scaffold", () => {
       writeFileSync(join(cwd, "started.ts"), "// run now AI!\n");
       await waitFor(() => harness.sent.length === 1);
 
-      expect(
-        JSON.parse(readFileSync(getProjectConfigPath(cwd).path, "utf-8")),
-      ).toEqual({
+      expect(readProjectConfig(cwd)).toEqual({
         enabled: true,
       });
       expect(harness.sent[0]).toContain("started.ts:1 action=edit");
@@ -360,11 +343,7 @@ describe("pi-watcher scaffold", () => {
   it("does not repeat an unchanged AI! comment after agent_end even if nearby code changes", async () => {
     const cwd = makeTempProject();
     const path = join(cwd, "loop.ts");
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
@@ -388,11 +367,7 @@ describe("pi-watcher scaffold", () => {
 
   it("dispatches AI? comments as answer-only prompts", async () => {
     const cwd = makeTempProject();
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     writeFileSync(join(cwd, "question.py"), "# why not use sum AI?\n");
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
@@ -413,11 +388,7 @@ describe("pi-watcher scaffold", () => {
 
   it("shows queued state and last trigger in the UI widget", async () => {
     const cwd = makeTempProject();
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      scanOnStart: false,
-    });
+    writeLiveProjectConfig(cwd);
     writeFileSync(join(cwd, "queued.ts"), "// do later AI!\nrun();\n");
     const harness = createExtensionHarness();
     const { ctx, statuses, widgets } = createMockContext(cwd, { idle: false });

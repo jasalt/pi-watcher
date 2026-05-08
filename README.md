@@ -132,7 +132,7 @@ After pi dispatches an actionable marker, `pi-watcher` remembers the normalized 
 ## Development
 
 ```bash
-bun install
+make init
 make doctor
 make test
 make check
