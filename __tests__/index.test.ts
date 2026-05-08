@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import piWatcherExtension, {
   DEFAULT_CONFIG,
   formatWatcherStatus,
@@ -62,30 +62,57 @@ type MockContext = {
   ui: {
     notify: (message: string, type?: "error" | "info" | "warning") => void;
     setStatus: (key: string, text: string | undefined) => void;
+    setWidget: (key: string, lines: string[] | undefined) => void;
   };
 };
 
-function createMockContext(cwd: string): {
+function createMockContext(
+  cwd: string,
+  options: { hasUI?: boolean; idle?: boolean; throwOnUi?: boolean } = {},
+): {
   ctx: MockContext;
   notifications: string[];
+  setIdle: (value: boolean) => void;
   statuses: string[];
+  widgets: string[];
 } {
+  let idle = options.idle ?? true;
   const notifications: string[] = [];
   const statuses: string[] = [];
+  const widgets: string[] = [];
+  const maybeThrow = () => {
+    if (options.throwOnUi) {
+      throw new Error("ctx.ui should not be called when hasUI is false");
+    }
+  };
 
   return {
     ctx: {
       cwd,
       hasPendingMessages: () => false,
-      hasUI: true,
-      isIdle: () => true,
+      hasUI: options.hasUI ?? true,
+      isIdle: () => idle,
       ui: {
-        notify: (message) => notifications.push(message),
-        setStatus: (key, text) => statuses.push(`${key}:${text ?? ""}`),
+        notify: (message) => {
+          maybeThrow();
+          notifications.push(message);
+        },
+        setStatus: (key, text) => {
+          maybeThrow();
+          statuses.push(`${key}:${text ?? ""}`);
+        },
+        setWidget: (key, lines) => {
+          maybeThrow();
+          widgets.push(`${key}:${lines?.join("|") ?? ""}`);
+        },
       },
     },
     notifications,
+    setIdle: (value) => {
+      idle = value;
+    },
     statuses,
+    widgets,
   };
 }
 
@@ -203,11 +230,14 @@ describe("pi-watcher scaffold", () => {
     const cwd = makeTempProject();
     writeProjectConfig(cwd, { enabled: true });
     const harness = createExtensionHarness();
-    const { ctx, statuses } = createMockContext(cwd);
+    const { ctx, statuses, widgets } = createMockContext(cwd);
 
     await harness.emit("session_start", ctx);
 
     expect(statuses).toContain("pi-watcher:watcher on");
+    expect(widgets).toContain(
+      "pi-watcher:pi-watcher: on|queued markers: 0|last trigger: none",
+    );
     await harness.emit("session_shutdown", ctx);
   });
 
@@ -276,9 +306,10 @@ describe("pi-watcher scaffold", () => {
 
     try {
       await harness.emit("session_start", ctx);
+      await sleep(50);
       writeFileSync(join(cwd, "sample.ts"), "// handle null AI!\nrun();\n");
 
-      await waitFor(() => harness.sent.length === 1);
+      await waitFor(() => harness.sent.length === 1, 4_000);
 
       expect(harness.sent[0]).toContain("sample.ts:1 action=edit");
     } finally {
@@ -362,21 +393,72 @@ describe("pi-watcher scaffold", () => {
       enabled: true,
       scanOnStart: false,
     });
+    writeFileSync(join(cwd, "question.py"), "# why not use sum AI?\n");
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
     try {
       await harness.emit("session_start", ctx);
-      writeFileSync(join(cwd, "question.py"), "# why not use sum AI?\n");
+      await harness.command.handler("scan", ctx);
 
-      await waitFor(() => harness.sent.length === 1);
-
+      expect(harness.sent).toHaveLength(1);
       expect(harness.sent[0]).toContain(
         "Answer the AI? comments. Do not edit files unless a comment explicitly asks for edits.",
       );
       expect(harness.sent[0]).toContain("question.py:1 action=ask");
     } finally {
       await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("shows queued state and last trigger in the UI widget", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      scanOnStart: false,
+    });
+    writeFileSync(join(cwd, "queued.ts"), "// do later AI!\nrun();\n");
+    const harness = createExtensionHarness();
+    const { ctx, statuses, widgets } = createMockContext(cwd, { idle: false });
+
+    try {
+      await harness.emit("session_start", ctx);
+      await harness.command.handler("scan", ctx);
+
+      expect(statuses).toContain("pi-watcher:watcher queued");
+      expect(harness.sent).toHaveLength(0);
+      expect(widgets.at(-1)).toBe(
+        "pi-watcher:pi-watcher: queued|queued markers: 1|last trigger: manual_scan (1 marker) queued.ts:1",
+      );
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("guards all UI updates when ctx.hasUI is false", async () => {
+    const cwd = makeTempProject();
+    writeProjectConfig(cwd, { enabled: true });
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd, {
+      hasUI: false,
+      throwOnUi: true,
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await harness.emit("session_start", ctx);
+      await harness.command.handler("status", ctx);
+      await harness.emit("session_shutdown", ctx);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("pi-watcher: enabled"),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("runtime: watcher off"),
+      );
+    } finally {
+      logSpy.mockRestore();
     }
   });
 });

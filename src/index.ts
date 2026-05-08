@@ -12,7 +12,9 @@ import {
   type WatcherAgentContext,
   WatcherRouter,
   type WatcherRouterResult,
+  type WatcherRouterSnapshot,
 } from "./router";
+import type { WatcherBatch } from "./state";
 import { PiFileWatcher } from "./watcher";
 
 export type WatcherConfigScope = "global" | "project";
@@ -123,13 +125,13 @@ const STRING_ARRAY_CONFIG_KEYS = ["roots", "include", "ignore"] as const;
 
 const VALID_SCOPES: ReadonlySet<string> = new Set(["global", "project"]);
 const WATCHER_HELP = [
-  "/watcher status              show watcher status",
+  "/watcher status              show state, config paths, queue, last trigger",
   "/watcher config              show effective config paths and values",
-  "/watcher start               enable watcher in project config",
-  "/watcher stop                disable watcher in project config",
-  "/watcher clear               clear pending queue + processed marker ledger",
-  "/watcher retry               retry last suppressed marker batch",
+  "/watcher start               enable project config and start now",
+  "/watcher stop                disable project config and stop now",
   "/watcher scan                scan roots now for AI comments",
+  "/watcher clear               clear pending queue and processed marker ledger",
+  "/watcher retry               retry last processed/suppressed marker batch",
   "/watcher global start|stop   update global config",
   "/watcher project start|stop  update project config",
 ].join("\n");
@@ -239,18 +241,86 @@ function saveConfigToPath(
   }
 }
 
-function setWatcherRuntimeStatus(
-  ctx: {
-    hasUI: boolean;
-    ui: { setStatus: (key: string, text: string | undefined) => void };
-  },
-  enabled: boolean,
+export type WatcherLastTrigger = {
+  markerCount: number;
+  reason: string;
+  target: string;
+};
+
+type WatcherUiContext = {
+  hasUI: boolean;
+  ui: {
+    setStatus: (key: string, text: string | undefined) => void;
+    setWidget: (key: string, lines: string[] | undefined) => void;
+  };
+};
+
+function formatMarkerCount(count: number): string {
+  return `${count} marker${count === 1 ? "" : "s"}`;
+}
+
+function formatLastTrigger(lastTrigger: WatcherLastTrigger | null): string {
+  if (!lastTrigger) {
+    return "none";
+  }
+
+  return `${lastTrigger.reason} (${formatMarkerCount(lastTrigger.markerCount)}) ${lastTrigger.target}`;
+}
+
+function createLastTrigger(batch: WatcherBatch): WatcherLastTrigger {
+  const actionableMarkers = batch.files.flatMap((file) =>
+    file.markers
+      .filter((marker) => marker.action !== "context")
+      .map((marker) => `${file.path}:${marker.line}`),
+  );
+  const markerCount = actionableMarkers.length;
+  const [firstTarget = "unknown"] = actionableMarkers;
+  const target =
+    markerCount > 1 ? `${firstTarget} +${markerCount - 1} more` : firstTarget;
+
+  return {
+    markerCount,
+    reason: batch.reason,
+    target,
+  };
+}
+
+function watcherUiState(
+  runtimeEnabled: boolean,
+  snapshot: WatcherRouterSnapshot,
+): string {
+  if (!runtimeEnabled) {
+    return "off";
+  }
+
+  if (snapshot.status === "queued") {
+    return "queued";
+  }
+
+  if (snapshot.status === "dispatching") {
+    return "dispatching";
+  }
+
+  return "on";
+}
+
+function updateWatcherUi(
+  ctx: WatcherUiContext,
+  runtimeEnabled: boolean,
+  snapshot: WatcherRouterSnapshot,
+  lastTrigger: WatcherLastTrigger | null,
 ): void {
   if (!ctx.hasUI) {
     return;
   }
 
-  ctx.ui.setStatus("pi-watcher", `watcher ${enabled ? "on" : "off"}`);
+  const state = watcherUiState(runtimeEnabled, snapshot);
+  ctx.ui.setStatus("pi-watcher", `watcher ${state}`);
+  ctx.ui.setWidget("pi-watcher", [
+    `pi-watcher: ${state}`,
+    `queued markers: ${snapshot.queuedMarkerCount}`,
+    `last trigger: ${formatLastTrigger(lastTrigger)}`,
+  ]);
 }
 
 export function parseWatcherArgs(args: string): WatcherCommand {
@@ -304,19 +374,42 @@ function loadEffectiveConfig(cwd: string): EffectiveWatcherConfig {
 export function formatWatcherStatus(
   cwd: string,
   runtimeEnabled?: boolean,
+  snapshot?: WatcherRouterSnapshot,
+  lastTrigger: WatcherLastTrigger | null = null,
 ): string {
   const globalPath = getGlobalConfigPath().path;
   const projectPath = getProjectConfigPath(cwd).path;
   const config = loadEffectiveConfig(cwd);
   const state = config.enabled ? "enabled" : "disabled";
   const runtimeState = runtimeEnabled ?? config.enabled;
-
-  return [
+  const lines = [
     `pi-watcher: ${state}`,
     `cwd: ${cwd}`,
     `global config: ${globalPath}`,
     `project config: ${projectPath}`,
     `runtime: watcher ${runtimeState ? "on" : "off"}`,
+  ];
+
+  if (snapshot) {
+    lines.push(
+      `queue: ${snapshot.queuedMarkerCount} marker(s)`,
+      `last trigger: ${formatLastTrigger(lastTrigger)}`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+export function formatWatcherConfig(
+  cwd: string,
+  runtimeEnabled: boolean,
+  snapshot: WatcherRouterSnapshot,
+  lastTrigger: WatcherLastTrigger | null = null,
+): string {
+  return [
+    formatWatcherStatus(cwd, runtimeEnabled, snapshot, lastTrigger),
+    "effective config:",
+    JSON.stringify(loadEffectiveConfig(cwd), null, 2),
   ].join("\n");
 }
 
@@ -362,6 +455,7 @@ type WatcherExtensionContext = WatcherAgentContext & {
   ui: {
     notify: (message: string, level?: "error" | "info" | "warning") => void;
     setStatus: (key: string, text: string | undefined) => void;
+    setWidget: (key: string, lines: string[] | undefined) => void;
   };
 };
 
@@ -369,6 +463,11 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
   const router = new WatcherRouter(pi);
   let runtimeEnabled = false;
   let fileWatcher: PiFileWatcher | null = null;
+  let lastTrigger: WatcherLastTrigger | null = null;
+
+  function refreshUi(ctx: WatcherExtensionContext): void {
+    updateWatcherUi(ctx, runtimeEnabled, router.getSnapshot(), lastTrigger);
+  }
 
   function createRuntimeWatcher(
     ctx: WatcherExtensionContext,
@@ -382,10 +481,12 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
       marker: effectiveConfig.marker,
       maxFileBytes: effectiveConfig.maxFileBytes,
       onBatch: (batch) => {
+        lastTrigger = createLastTrigger(batch);
         router.enqueueBatch(batch, ctx, {
           contextLines: effectiveConfig.contextLines,
           maxPromptBytes: effectiveConfig.maxPromptBytes,
         });
+        refreshUi(ctx);
       },
       onError: (error) => {
         publishMessage(
@@ -394,6 +495,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
           "warning",
         );
       },
+      persistent: ctx.hasUI,
       roots: effectiveConfig.roots,
     });
   }
@@ -422,7 +524,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
     }
 
     runtimeEnabled = true;
-    setWatcherRuntimeStatus(ctx, true);
+    refreshUi(ctx);
 
     if (scanReason) {
       await watcher.scan(scanReason);
@@ -434,10 +536,10 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
     effectiveConfig: EffectiveWatcherConfig,
   ): Promise<void> {
     try {
-      if (!effectiveConfig.enabled) {
+      if (!effectiveConfig.enabled || !ctx.hasUI) {
         await closeRuntimeWatcher();
         runtimeEnabled = false;
-        setWatcherRuntimeStatus(ctx, false);
+        refreshUi(ctx);
         return;
       }
 
@@ -449,7 +551,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
     } catch (error) {
       await closeRuntimeWatcher();
       runtimeEnabled = false;
-      setWatcherRuntimeStatus(ctx, false);
+      refreshUi(ctx);
       publishMessage(
         ctx,
         `Failed to start pi-watcher: ${String(error)}`,
@@ -479,11 +581,12 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     await closeRuntimeWatcher();
     runtimeEnabled = false;
-    setWatcherRuntimeStatus(ctx, runtimeEnabled);
+    refreshUi(ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
     router.handleAgentEnd(ctx);
+    refreshUi(ctx);
   });
 
   pi.registerCommand("watcher", {
@@ -517,6 +620,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
 
       if (command.kind === "clear") {
         router.clear();
+        refreshUi(ctx);
         publishMessage(
           ctx,
           "pi-watcher queue and processed marker ledger cleared",
@@ -530,6 +634,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
           contextLines: effectiveConfig.contextLines,
           maxPromptBytes: effectiveConfig.maxPromptBytes,
         });
+        refreshUi(ctx);
         publishMessage(ctx, formatRetryResult(result));
         return;
       }
@@ -539,11 +644,25 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
           ctx,
           loadEffectiveConfig(ctx.cwd),
         );
+        refreshUi(ctx);
         publishMessage(
           ctx,
           didDispatch
             ? "pi-watcher scan: actionable markers dispatched or queued"
             : "pi-watcher scan: no actionable markers found",
+        );
+        return;
+      }
+
+      if (command.kind === "config") {
+        publishMessage(
+          ctx,
+          formatWatcherConfig(
+            ctx.cwd,
+            runtimeEnabled,
+            router.getSnapshot(),
+            lastTrigger,
+          ),
         );
         return;
       }
@@ -566,6 +685,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         const effectiveConfig = loadEffectiveConfig(ctx.cwd);
         await applyEffectiveConfig(ctx, effectiveConfig);
 
+        refreshUi(ctx);
         publishMessage(
           ctx,
           `pi-watcher ${command.scope} config set to enabled=${command.enabled}`,
@@ -573,7 +693,15 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      publishMessage(ctx, formatWatcherStatus(ctx.cwd, runtimeEnabled));
+      publishMessage(
+        ctx,
+        formatWatcherStatus(
+          ctx.cwd,
+          runtimeEnabled,
+          router.getSnapshot(),
+          lastTrigger,
+        ),
+      );
     },
   });
 }

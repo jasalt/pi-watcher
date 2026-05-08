@@ -20,6 +20,7 @@ interface PiFileWatcherOptions {
   onBatch?: (batch: WatcherBatch) => Promise<void> | void;
   onDelete?: (relativePath: string) => Promise<void> | void;
   onError?: (error: Error) => Promise<void> | void;
+  persistent?: boolean;
   roots: readonly string[];
 }
 
@@ -83,7 +84,7 @@ export class PiFileWatcher {
       followSymlinks: false,
       ignoreInitial: true,
       ignored: (path, stats) => this.isIgnoredForWatch(path.toString(), stats),
-      persistent: true,
+      persistent: this.options.persistent ?? true,
     });
 
     this.watcher = watcher;
