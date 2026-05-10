@@ -25,11 +25,12 @@ const EDIT_INSTRUCTIONS = `You are responding to pi-watcher comments the user ad
 Treat comments marked AI! as targeted code-change requests.
 Use read/edit/write tools as needed. Keep changes focused.
 After completing requested changes, remove handled AI! comments.
-Do not remove plain AI context anchors unless they are part of the handled block.`;
+Do not remove plain AI context anchors unless they are part of the handled block.
+This is a pi-watcher fast-path turn: make the smallest useful edit directly; skip large task workflow unless the marked request clearly requires it.`;
 
 const ASK_INSTRUCTIONS =
   "You are responding to pi-watcher questions the user added in their editor.\n" +
-  "Answer the AI? comments. Do not edit files unless a comment explicitly asks for edits.";
+  "Answer the AI? comments. Do not edit files.";
 
 function getPromptHeader(action: "ask" | "edit"): string {
   return action === "edit"
