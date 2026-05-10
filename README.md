@@ -1,4 +1,4 @@
-# Pi Watcher
+![pi-watcher banner](images/banner.png)
 
 Editor comment watch mode for `pi-coding-agent`.
 
