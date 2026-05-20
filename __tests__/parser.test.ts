@@ -7,7 +7,7 @@ describe("parseAiMarkers", () => {
       "def py():",
       "    # fix auth flow AI!",
       "const js = 1; // what happens here ai?",
-      ";;; keep this helper AI",
+      ";;; keep this helper AI.",
     ].join("\n");
 
     expect(parseAiMarkers(source, { path: "mixed.txt" })).toMatchObject([
@@ -29,24 +29,26 @@ describe("parseAiMarkers", () => {
         action: "context",
         commentPrefix: ";;;",
         line: 4,
-        markerText: "AI",
+        markerText: "AI.",
         path: "mixed.txt",
       },
     ]);
   });
 
-  it("supports marker at comment start or comment end", () => {
+  it("supports markers at normalized comment start or comment end", () => {
     const source = [
       "# ai! rewrite this",
       "value = compute() # rewrite this AI!",
+      "const z = 1; //AI! compact comment start",
     ].join("\n");
 
     const markers = parseAiMarkers(source, { path: "start-end.py" });
 
-    expect(markers).toHaveLength(2);
+    expect(markers).toHaveLength(3);
     expect(markers.map((marker) => marker.instruction)).toEqual([
       "ai! rewrite this",
       "rewrite this AI!",
+      "AI! compact comment start",
     ]);
   });
 
@@ -75,7 +77,7 @@ describe("parseAiMarkers", () => {
     });
   });
 
-  it("does not match OpenAI, strings, or non-comment lines", () => {
+  it("does not match OpenAI, bare AI, punctuation-prefixed markers, strings, or non-comment lines", () => {
     const source = [
       "const brand = 'OpenAI';",
       "const fake = '// ai!';",
@@ -83,6 +85,12 @@ describe("parseAiMarkers", () => {
       "not a comment ai!",
       "# mention AI in middle only",
       "# real marker AI?",
+      "# context marker AI.",
+      "# -ai! false positive",
+      "# thing-ai? false positive",
+      "# AI, no suffix",
+      "# AI",
+      "# case-insensitive context ai.",
     ].join("\n");
 
     expect(
@@ -92,6 +100,16 @@ describe("parseAiMarkers", () => {
         action: "ask",
         line: 6,
         markerText: "AI?",
+      },
+      {
+        action: "context",
+        line: 7,
+        markerText: "AI.",
+      },
+      {
+        action: "context",
+        line: 12,
+        markerText: "ai.",
       },
     ]);
   });

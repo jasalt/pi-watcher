@@ -82,6 +82,22 @@ describe("PiFileWatcher", () => {
     });
   });
 
+  it("does not trigger for punctuation-prefixed or bare AI comments", async () => {
+    const cwd = makeTempProject();
+    const batches: WatcherBatch[] = [];
+    const watcher = makeWatcher(cwd, batches);
+
+    await watcher.start();
+    await sleep(50);
+    writeFileSync(
+      join(cwd, "false-positive.ts"),
+      "// -ai! should not run\n// random AI text\n",
+    );
+    await sleep(150);
+
+    expect(batches).toHaveLength(0);
+  });
+
   it("does not trigger for ignored paths", async () => {
     const cwd = makeTempProject();
     mkdirSync(join(cwd, "node_modules", "pkg"), { recursive: true });

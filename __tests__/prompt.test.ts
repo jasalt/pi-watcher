@@ -37,7 +37,8 @@ describe("buildWatcherPrompt", () => {
       Treat comments marked AI! as targeted code-change requests.
       Use read/edit/write tools as needed. Keep changes focused.
       After completing requested changes, remove handled AI! comments.
-      Do not remove plain AI context anchors unless they are part of the handled block.
+      Do not remove \`AI.\` context anchors unless they are part of the handled block.
+      This is a pi-watcher fast-path turn: make the smallest useful edit directly; skip large task workflow unless the marked request clearly requires it.
 
       Marked comments:
       src/label.ts:2 action=edit
@@ -76,10 +77,10 @@ describe("buildWatcherPrompt", () => {
     `);
   });
 
-  it("includes plain AI anchors with the next actionable batch", () => {
+  it("includes AI. anchors with the next actionable batch", () => {
     const anchorContent = [
       "export const MAX_RETRIES = 3;",
-      "// keep retry budget in mind AI",
+      "// keep retry budget in mind AI.",
     ].join("\n");
     const actionContent = [
       'import { MAX_RETRIES } from "./config";',
@@ -115,13 +116,14 @@ describe("buildWatcherPrompt", () => {
       Treat comments marked AI! as targeted code-change requests.
       Use read/edit/write tools as needed. Keep changes focused.
       After completing requested changes, remove handled AI! comments.
-      Do not remove plain AI context anchors unless they are part of the handled block.
+      Do not remove \`AI.\` context anchors unless they are part of the handled block.
+      This is a pi-watcher fast-path turn: make the smallest useful edit directly; skip large task workflow unless the marked request clearly requires it.
 
       Marked comments:
       src/config.ts:2 action=context
       \`\`\`ts
       1 | export const MAX_RETRIES = 3;
-      2 █ // keep retry budget in mind AI
+      2 █ // keep retry budget in mind AI.
       \`\`\`
 
       src/request.ts:3 action=edit
@@ -159,7 +161,7 @@ describe("buildWatcherPrompt", () => {
   });
 
   it("returns null for context-only markers", () => {
-    const content = "// remember this helper AI\nexport const x = 1;";
+    const content = "// remember this helper AI.\nexport const x = 1;";
 
     expect(promptFor("src/context.ts", content)).toBeNull();
   });

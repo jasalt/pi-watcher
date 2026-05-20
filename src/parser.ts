@@ -34,10 +34,7 @@ const DEFAULT_MARKER = "AI";
 
 function buildMarkerRegex(marker: string): RegExp {
   const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(
-    `(^|[^A-Za-z0-9_])(${escaped}[!?]?)(?=$|[^A-Za-z0-9_])`,
-    "gi",
-  );
+  return new RegExp(`(^|\\s)(${escaped}(?:[!?]|\\.))(?=$|[^A-Za-z0-9_])`, "gi");
 }
 
 function normalizeCommentPrefix(prefix: string): string {

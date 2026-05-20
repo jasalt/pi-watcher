@@ -2,7 +2,7 @@
 
 Editor comment watch mode for `pi-coding-agent`.
 
-`pi-watcher` watches files in the current pi working directory for explicit `AI!`, `AI?`, and plain `AI` comments. When you save a file with an actionable marker, it sends a focused prompt into the active pi session.
+`pi-watcher` watches files in the current pi working directory for explicit `AI!`, `AI?`, and `AI.` comments. When you save a file with an actionable marker, it sends a focused prompt into the active pi session.
 
 ## Install
 
@@ -38,16 +38,16 @@ Supported line-comment prefixes: `#`, `//`, `--`, and semicolon comments such as
 ```ts
 // AI! edit this code
 // explain this branch AI?
-// AI context anchor only
+// AI. context anchor only
 ```
 
-Markers are case-insensitive (`ai!`, `AI?`, `Ai`) and may appear at the start or end of a comment. `OpenAI` is ignored.
+Markers are case-insensitive (`ai!`, `AI?`, `Ai.`) and may appear at the normalized comment start or at the end of a comment after whitespace. `OpenAI`, `-ai!`, `some-ai?`, and bare `AI` are ignored.
 
 Marker behavior:
 
 - `AI!`: edit request. Prompt tells pi to use normal read/edit/write tools and remove handled `AI!` comments.
 - `AI?`: question. Prompt tells pi to answer without editing unless comment explicitly asks for edits.
-- `AI`: context anchor. Included with next actionable `AI!` or `AI?` batch, but does not trigger a turn alone.
+- `AI.`: context anchor. Included with next actionable `AI!` or `AI?` batch, but does not trigger a turn alone.
 
 ## Commands
 
