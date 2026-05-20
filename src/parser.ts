@@ -134,25 +134,24 @@ function parseMarkerToken(
   markerPattern: RegExp,
 ): { markerText: string; action: AiMarkerAction } | null {
   const trimmedText = text.trim();
-  const matcher = new RegExp(markerPattern.source, markerPattern.flags);
+  let selectedMatch: RegExpExecArray | null = null;
 
-  let endMatch: RegExpExecArray | null = null;
-  for (const match of trimmedText.matchAll(matcher)) {
+  for (const match of trimmedText.matchAll(markerPattern)) {
     if (match.index === 0) {
-      const markerText = match[2];
-      return { markerText, action: markerActionFromText(markerText) };
+      selectedMatch = match;
+      break;
     }
 
     if (match.index + match[0].length === trimmedText.length) {
-      endMatch = match;
+      selectedMatch = match;
     }
   }
 
-  if (!endMatch) {
+  if (!selectedMatch) {
     return null;
   }
 
-  const markerText = endMatch[2];
+  const markerText = selectedMatch[2];
   return { markerText, action: markerActionFromText(markerText) };
 }
 
@@ -161,11 +160,7 @@ function buildContextInput(
   normalizedBlock: string,
   lines: string[],
 ): string {
-  if (lines.length === 0) {
-    return `${path}\n${normalizedBlock}`;
-  }
-
-  return `${path}\n${normalizedBlock}\n${lines.join("\n")}`;
+  return [path, normalizedBlock, ...lines].join("\n");
 }
 
 export function parseAiMarkers(
@@ -196,25 +191,18 @@ export function parseAiMarkers(
     const { markerText, action } = markerResult;
 
     let start = i;
-    while (start > 0) {
-      const previous = parsedLines[start - 1];
-      if (
-        !previous ||
-        previous.commentPrefixKind !== current.commentPrefixKind
-      ) {
-        break;
-      }
-
+    while (
+      start > 0 &&
+      parsedLines[start - 1]?.commentPrefixKind === current.commentPrefixKind
+    ) {
       start -= 1;
     }
 
     let end = i;
-    while (end + 1 < parsedLines.length) {
-      const next = parsedLines[end + 1];
-      if (!next || next.commentPrefixKind !== current.commentPrefixKind) {
-        break;
-      }
-
+    while (
+      end + 1 < parsedLines.length &&
+      parsedLines[end + 1]?.commentPrefixKind === current.commentPrefixKind
+    ) {
       end += 1;
     }
 
