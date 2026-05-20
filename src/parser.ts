@@ -41,10 +41,6 @@ function normalizeCommentPrefix(prefix: string): string {
   return prefix.startsWith(";") ? ";" : prefix;
 }
 
-function normalizeLine(line: string): string {
-  return line.trim();
-}
-
 function makeParsedCommentLine(
   prefix: string,
   text: string,
@@ -52,7 +48,7 @@ function makeParsedCommentLine(
   return {
     commentPrefix: prefix,
     commentPrefixKind: normalizeCommentPrefix(prefix),
-    text: normalizeLine(text),
+    text: text.trim(),
   };
 }
 
@@ -155,25 +151,14 @@ function parseMarkerToken(
   return { markerText, action: markerActionFromText(markerText) };
 }
 
-function buildContextInput(
-  path: string,
-  normalizedBlock: string,
-  lines: string[],
-): string {
-  return [path, normalizedBlock, ...lines].join("\n");
-}
-
 export function parseAiMarkers(
   source: string,
   options: ParseAiMarkersOptions = {},
 ): ParsedAiMarker[] {
   const path = options.path ?? "";
-  const markerWord = options.marker ?? DEFAULT_MARKER;
-  const markerPattern = buildMarkerRegex(markerWord);
+  const markerPattern = buildMarkerRegex(options.marker ?? DEFAULT_MARKER);
   const lines = source.split(/\r\n|\n|\r/);
-  const parsedLines: Array<ParsedCommentLine | null> = lines.map((line) =>
-    findLineComment(line),
-  );
+  const parsedLines = lines.map(findLineComment);
 
   const markers: ParsedAiMarker[] = [];
 
@@ -231,11 +216,9 @@ export function parseAiMarkers(
       .map((line) => line.trim())
       .join("\n");
 
-    const markerContextInput = buildContextInput(
-      path,
-      normalizedBlock,
-      contextSnippet ? [contextSnippet] : [],
-    );
+    const markerContextInput = contextSnippet
+      ? `${markerIntentInput}\n${contextSnippet}`
+      : markerIntentInput;
 
     markers.push({
       action,
