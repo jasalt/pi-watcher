@@ -37,11 +37,6 @@ export interface WatcherRouterSnapshot {
   status: "dispatching" | "queued" | "watching";
 }
 
-interface LastCompleted {
-  batch: WatcherBatch;
-  markerIds: string[];
-}
-
 interface QueuedBatch {
   options?: BuildWatcherPromptOptions;
   promptBatch: WatcherBatch;
@@ -90,7 +85,7 @@ function createRouterSnapshot(
 export class WatcherRouter {
   private readonly pi: WatcherRouterApi;
   private readonly state: WatcherState;
-  private lastCompleted: LastCompleted | null = null;
+  private lastCompleted: CompletedWatcherBatch | null = null;
   private lastDispatchedMarkerCount = 0;
   private queue: QueuedBatch[] = [];
   private status: "dispatching" | "queued" | "watching" = "watching";

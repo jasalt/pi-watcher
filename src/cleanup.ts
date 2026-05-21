@@ -12,22 +12,18 @@ interface CleanupConfig {
 // [ref:line_comment_parsing] Shared parser helper supplies comment spans for
 // stripping inline trigger comments without deleting code.
 
-function commentPrefixStart(line: string): number | null {
-  return findLineComment(line)?.start ?? null;
-}
-
 function isStandaloneCommentLine(line: string): boolean {
-  const start = commentPrefixStart(line);
-  return start !== null && line.slice(0, start).trim() === "";
+  const comment = findLineComment(line);
+  return comment !== null && line.slice(0, comment.start).trim() === "";
 }
 
 function removeLineCommentFromLine(line: string): string | null {
-  const start = commentPrefixStart(line);
-  if (start === null) {
+  const comment = findLineComment(line);
+  if (!comment) {
     return line;
   }
 
-  const before = line.slice(0, start);
+  const before = line.slice(0, comment.start);
   if (before.trim() === "") {
     return null;
   }
@@ -45,11 +41,14 @@ function isWithinPath(parent: string, child: string): boolean {
   );
 }
 
-function resolvePathWithinCwd(cwd: string, path: string): string | null {
+function resolvePathWithinCwd(
+  cwd: string,
+  relativePath: string,
+): string | null {
   const base = resolve(cwd);
-  const candidate = resolve(base, path);
+  const absolutePath = resolve(base, relativePath);
 
-  return isWithinPath(base, candidate) ? candidate : null;
+  return isWithinPath(base, absolutePath) ? absolutePath : null;
 }
 
 function collectPreservedContextLines(
@@ -90,14 +89,18 @@ function collectLinesToClean(
       lineNumber <= marker.block.endLine;
       lineNumber += 1
     ) {
-      const line = lines[lineNumber - 1];
       if (
         lineNumber <= 0 ||
         lineNumber > lines.length ||
-        preservedContextLines.has(lineNumber) ||
-        (line !== undefined &&
-          !handledActionLines.has(lineNumber) &&
-          !isStandaloneCommentLine(line))
+        preservedContextLines.has(lineNumber)
+      ) {
+        continue;
+      }
+
+      const line = lines[lineNumber - 1];
+      if (
+        !handledActionLines.has(lineNumber) &&
+        !isStandaloneCommentLine(line)
       ) {
         continue;
       }
@@ -109,14 +112,14 @@ function collectLinesToClean(
   return linesToClean;
 }
 
-function isCleanupCandidateFile(cwd: string, path: string): boolean {
+function isCleanupCandidateFile(cwd: string, absolutePath: string): boolean {
   try {
-    const stats = lstatSync(path);
+    const stats = lstatSync(absolutePath);
     if (!stats.isFile() || stats.isSymbolicLink()) {
       return false;
     }
 
-    return isWithinPath(realpathSync(cwd), realpathSync(path));
+    return isWithinPath(realpathSync(cwd), realpathSync(absolutePath));
   } catch {
     return false;
   }
