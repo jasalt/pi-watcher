@@ -29,7 +29,7 @@ No `--watch` flag is needed. If the extension is installed and config does not d
 
 3. Save the file.
 4. pi receives a user message with file path, line number, and surrounding snippet.
-5. For `AI!`, pi should make focused edits and remove handled action comments.
+5. For `AI!`, pi should make focused edits. After the agent turn ends, `pi-watcher` removes the handled trigger comments by default.
 
 ## Marker syntax
 
@@ -45,8 +45,8 @@ Markers are case-insensitive (`ai!`, `AI?`, `Ai.`) and may appear at the normali
 
 Marker behavior:
 
-- `AI!`: edit request. Prompt tells pi to use normal read/edit/write tools and remove handled `AI!` comments.
-- `AI?`: question. Prompt tells pi to answer without editing unless comment explicitly asks for edits.
+- `AI!`: edit request. Prompt tells pi to use normal read/edit/write tools; watcher removes handled trigger comment blocks after the run.
+- `AI?`: question. Prompt tells pi to answer without editing unless comment explicitly asks for edits; watcher removes handled question comments after the run.
 - `AI.`: context anchor. Included with next actionable `AI!` or `AI?` batch, but does not trigger a turn alone.
 
 ## Commands
@@ -119,7 +119,9 @@ Example project override:
 
 ## Loop prevention
 
-After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent. If pi changes nearby code but leaves the same `AI!` or `AI?` comment in place, the watcher suppresses repeat dispatches. Change the comment text or run `/watcher retry` to dispatch it again.
+After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent and, by default, removes handled `AI!`/`AI?` trigger comment blocks when the agent turn ends. Inline trigger comments are stripped while preserving code before the comment. `AI.` context anchors are preserved unless `removeContextAnchorsInActionBlock` is enabled.
+
+If cleanup is disabled or pi leaves the same `AI!` or `AI?` comment in place, the watcher suppresses repeat dispatches. Change the comment text or run `/watcher retry` to dispatch it again.
 
 ## Risks and limits
 

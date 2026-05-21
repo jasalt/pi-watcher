@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -335,6 +336,196 @@ describe("pi-watcher scaffold", () => {
         enabled: true,
       });
       expect(harness.sent[0]).toContain("started.ts:1 action=edit");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("removes handled AI! trigger comment blocks after agent_end", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "cleanup.ts");
+    writeLiveProjectConfig(cwd);
+    writeFileSync(
+      path,
+      [
+        "// keep nearby context AI.",
+        "// explain constraints",
+        "// add guard AI!",
+        "// keep null-safe",
+        "export const value = compute(); // handle inline AI!",
+        "run();",
+        "",
+      ].join("\n"),
+    );
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(path, "utf-8")).toBe(
+        [
+          "// keep nearby context AI.",
+          "export const value = compute();",
+          "run();",
+          "",
+        ].join("\n"),
+      );
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("removes handled AI? trigger comments after agent_end", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "cleanup-question.py");
+    writeLiveProjectConfig(cwd);
+    writeFileSync(path, "# why not use sum AI?\nvalue = 1\n");
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+      expect(harness.sent[0]).toContain("cleanup-question.py:1 action=ask");
+
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(path, "utf-8")).toBe("value = 1\n");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("keeps handled trigger comments when cleanup config is disabled", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "cleanup-disabled.ts");
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      removeHandledActionComments: false,
+      scanOnStart: false,
+    });
+    writeFileSync(path, "// add guard AI!\nrun();\n");
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(path, "utf-8")).toBe("// add guard AI!\nrun();\n");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("removes context anchors in handled blocks when configured", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "cleanup-context.ts");
+    writeProjectConfig(cwd, {
+      debounceMs: 20,
+      enabled: true,
+      removeContextAnchorsInActionBlock: true,
+      scanOnStart: false,
+    });
+    writeFileSync(path, "// keep this context AI.\n// add guard AI!\nrun();\n");
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(path, "utf-8")).toBe("run();\n");
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("preserves adjacent inline comments that are not trigger lines", async () => {
+    const cwd = makeTempProject();
+    const path = join(cwd, "cleanup-inline.ts");
+    writeLiveProjectConfig(cwd);
+    writeFileSync(
+      path,
+      "const a = 1; // fix this AI!\nconst b = 2; // keep this note\n",
+    );
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(path, "utf-8")).toBe(
+        "const a = 1;\nconst b = 2; // keep this note\n",
+      );
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("does not clean up through a symlink swapped in after scan", async () => {
+    const cwd = makeTempProject();
+    const outside = makeTempProject();
+    const path = join(cwd, "cleanup-symlink.ts");
+    const outsidePath = join(outside, "outside.ts");
+    writeLiveProjectConfig(cwd);
+    writeFileSync(path, "// add guard AI!\nrun();\n");
+    writeFileSync(outsidePath, "// add guard AI!\nrun();\n");
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      rmSync(path);
+      symlinkSync(outsidePath, path);
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(outsidePath, "utf-8")).toBe(
+        "// add guard AI!\nrun();\n",
+      );
+    } finally {
+      await harness.emit("session_shutdown", ctx);
+    }
+  });
+
+  it("does not clean up through a parent directory symlink swapped in after scan", async () => {
+    const cwd = makeTempProject();
+    const outside = makeTempProject();
+    const nestedDir = join(cwd, "nested");
+    const path = join(nestedDir, "cleanup-parent-symlink.ts");
+    const outsidePath = join(outside, "cleanup-parent-symlink.ts");
+    mkdirSync(nestedDir);
+    writeLiveProjectConfig(cwd);
+    writeFileSync(path, "// add guard AI!\nrun();\n");
+    writeFileSync(outsidePath, "// add guard AI!\nrun();\n");
+    const harness = createExtensionHarness();
+    const { ctx } = createMockContext(cwd);
+
+    try {
+      await harness.command.handler("scan", ctx);
+      expect(harness.sent).toHaveLength(1);
+
+      rmSync(nestedDir, { recursive: true });
+      symlinkSync(outside, nestedDir);
+      await harness.emit("agent_end", ctx);
+
+      expect(readFileSync(outsidePath, "utf-8")).toBe(
+        "// add guard AI!\nrun();\n",
+      );
     } finally {
       await harness.emit("session_shutdown", ctx);
     }

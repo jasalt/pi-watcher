@@ -27,6 +27,7 @@ export interface ParseAiMarkersOptions {
 interface ParsedCommentLine {
   commentPrefix: string;
   commentPrefixKind: string;
+  start: number;
   text: string;
 }
 
@@ -43,16 +44,20 @@ function normalizeCommentPrefix(prefix: string): string {
 
 function makeParsedCommentLine(
   prefix: string,
+  start: number,
   text: string,
 ): ParsedCommentLine {
   return {
     commentPrefix: prefix,
     commentPrefixKind: normalizeCommentPrefix(prefix),
+    start,
     text: text.trim(),
   };
 }
 
-function findLineComment(line: string): ParsedCommentLine | null {
+// [tag:line_comment_parsing] Cleanup mirrors these line-comment rules when
+// removing handled watcher trigger comments after a run completes.
+export function findLineComment(line: string): ParsedCommentLine | null {
   let quote: "'" | '"' | "`" | null = null;
   let escaped = false;
 
@@ -83,15 +88,15 @@ function findLineComment(line: string): ParsedCommentLine | null {
     }
 
     if (char === "#") {
-      return makeParsedCommentLine("#", line.slice(i + 1));
+      return makeParsedCommentLine("#", i, line.slice(i + 1));
     }
 
     if (char === "/" && line[i + 1] === "/") {
-      return makeParsedCommentLine("//", line.slice(i + 2));
+      return makeParsedCommentLine("//", i, line.slice(i + 2));
     }
 
     if (char === "-" && line[i + 1] === "-") {
-      return makeParsedCommentLine("--", line.slice(i + 2));
+      return makeParsedCommentLine("--", i, line.slice(i + 2));
     }
 
     if (char === ";") {
@@ -106,7 +111,7 @@ function findLineComment(line: string): ParsedCommentLine | null {
         continue;
       }
 
-      return makeParsedCommentLine(line.slice(i, j), line.slice(j));
+      return makeParsedCommentLine(line.slice(i, j), i, line.slice(j));
     }
   }
 

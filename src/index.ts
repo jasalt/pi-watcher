@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { cleanupHandledActionComments } from "./cleanup";
 import {
   type WatcherAgentContext,
   WatcherRouter,
@@ -585,7 +586,12 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    router.handleAgentEnd(ctx);
+    const result = router.handleAgentEnd(ctx);
+    cleanupHandledActionComments(
+      ctx.cwd,
+      result.completed ?? null,
+      loadEffectiveConfig(ctx.cwd),
+    );
     refreshUi(ctx);
   });
 

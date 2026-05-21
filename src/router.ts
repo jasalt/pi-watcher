@@ -1,6 +1,7 @@
 import type { ParsedAiMarker } from "./parser";
 import { type BuildWatcherPromptOptions, buildWatcherPrompt } from "./prompt";
 import {
+  type CompletedWatcherBatch,
   PI_WATCHER_STATE_ENTRY_TYPE,
   type WatcherBatch,
   type WatcherState,
@@ -24,6 +25,7 @@ export type WatcherRouterStatus =
   | "suppressed";
 
 export interface WatcherRouterResult {
+  completed?: CompletedWatcherBatch;
   status: WatcherRouterStatus;
 }
 
@@ -128,12 +130,15 @@ export class WatcherRouter {
     }
 
     if (this.queue.length > 0) {
-      return this.dispatchFromQueue(context);
+      const result = this.dispatchFromQueue(context);
+      return completed ? { ...result, completed } : result;
     }
 
     this.status = "watching";
     this.persistSnapshot();
-    return { status: "completed" };
+    return completed
+      ? { status: "completed", completed }
+      : { status: "completed" };
   }
 
   retryLast(
