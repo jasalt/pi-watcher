@@ -60,24 +60,14 @@ function collectLinesToClean(
   );
 
   for (const marker of handledMarkers) {
-    for (
-      let lineNumber = marker.block.startLine;
-      lineNumber <= marker.block.endLine;
-      lineNumber += 1
-    ) {
-      if (lineNumber <= 0 || lineNumber > lines.length) {
-        continue;
-      }
+    const startLine = Math.max(1, marker.block.startLine);
+    const endLine = Math.min(marker.block.endLine, lines.length);
 
+    for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
       const line = lines[lineNumber - 1];
-      if (
-        !handledMarkerLines.has(lineNumber) &&
-        !isStandaloneCommentLine(line)
-      ) {
-        continue;
+      if (handledMarkerLines.has(lineNumber) || isStandaloneCommentLine(line)) {
+        linesToClean.add(lineNumber);
       }
-
-      linesToClean.add(lineNumber);
     }
   }
 
@@ -94,6 +84,34 @@ function isCleanupCandidateFile(cwd: string, absolutePath: string): boolean {
     return isWithinPath(realpathSync(cwd), realpathSync(absolutePath));
   } catch {
     return false;
+  }
+}
+
+function readCleanupContent(absolutePath: string, cwd: string): string | null {
+  if (!isCleanupCandidateFile(cwd, absolutePath)) {
+    return null;
+  }
+
+  try {
+    return readFileSync(absolutePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function writeCleanupContent(
+  absolutePath: string,
+  content: string,
+  cwd: string,
+): void {
+  if (!isCleanupCandidateFile(cwd, absolutePath)) {
+    return;
+  }
+
+  try {
+    writeFileSync(absolutePath, content);
+  } catch {
+    // Ignore cleanup races or permission errors; watcher state is already safe.
   }
 }
 
@@ -130,7 +148,7 @@ function removeHandledMarkerBlocksFromContent(
   return output.join(lineEnding);
 }
 
-function collectCompletedMarkerIds(
+function collectHandledMarkerIds(
   completed: CompletedWatcherBatch,
 ): Set<string> {
   return new Set(
@@ -149,21 +167,19 @@ export function cleanupHandledMarkerComments(
     return;
   }
 
-  const handledMarkerIds = collectCompletedMarkerIds(completed);
+  const handledMarkerIds = collectHandledMarkerIds(completed);
   if (handledMarkerIds.size === 0) {
     return;
   }
 
   for (const file of completed.batch.files) {
     const absolutePath = resolvePathWithinCwd(cwd, file.path);
-    if (!absolutePath || !isCleanupCandidateFile(cwd, absolutePath)) {
+    if (!absolutePath) {
       continue;
     }
 
-    let content: string;
-    try {
-      content = readFileSync(absolutePath, "utf-8");
-    } catch {
+    const content = readCleanupContent(absolutePath, cwd);
+    if (content === null) {
       continue;
     }
 
@@ -177,18 +193,8 @@ export function cleanupHandledMarkerComments(
       handledMarkerIds,
     );
 
-    if (nextContent === content) {
-      continue;
-    }
-
-    try {
-      if (!isCleanupCandidateFile(cwd, absolutePath)) {
-        continue;
-      }
-
-      writeFileSync(absolutePath, nextContent);
-    } catch {
-      // Ignore cleanup races or permission errors; watcher state is already safe.
+    if (nextContent !== content) {
+      writeCleanupContent(absolutePath, nextContent, cwd);
     }
   }
 }
