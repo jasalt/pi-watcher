@@ -5,8 +5,7 @@ import { type CompletedWatcherBatch, createMarkerIntentId } from "./state";
 
 interface CleanupConfig {
   marker: string;
-  removeContextAnchorsInActionBlock: boolean;
-  removeHandledActionComments: boolean;
+  removeHandledMarkerComments: boolean;
 }
 
 // [ref:line_comment_parsing] Shared parser helper supplies comment spans for
@@ -51,55 +50,28 @@ function resolvePathWithinCwd(
   return isWithinPath(base, absolutePath) ? absolutePath : null;
 }
 
-function collectPreservedContextLines(
-  currentMarkers: ParsedAiMarker[],
-  handledMarkerIds: ReadonlySet<string>,
-  removeContextAnchorsInActionBlock: boolean,
-): Set<number> {
-  const preserved = new Set<number>();
-  if (removeContextAnchorsInActionBlock) {
-    return preserved;
-  }
-
-  for (const marker of currentMarkers) {
-    if (
-      marker.action === "context" &&
-      handledMarkerIds.has(createMarkerIntentId(marker))
-    ) {
-      preserved.add(marker.line);
-    }
-  }
-
-  return preserved;
-}
-
 function collectLinesToClean(
   lines: string[],
-  handledActionMarkers: ParsedAiMarker[],
-  preservedContextLines: ReadonlySet<number>,
+  handledMarkers: ParsedAiMarker[],
 ): Set<number> {
   const linesToClean = new Set<number>();
-  const handledActionLines = new Set(
-    handledActionMarkers.map((marker) => marker.line),
+  const handledMarkerLines = new Set(
+    handledMarkers.map((marker) => marker.line),
   );
 
-  for (const marker of handledActionMarkers) {
+  for (const marker of handledMarkers) {
     for (
       let lineNumber = marker.block.startLine;
       lineNumber <= marker.block.endLine;
       lineNumber += 1
     ) {
-      if (
-        lineNumber <= 0 ||
-        lineNumber > lines.length ||
-        preservedContextLines.has(lineNumber)
-      ) {
+      if (lineNumber <= 0 || lineNumber > lines.length) {
         continue;
       }
 
       const line = lines[lineNumber - 1];
       if (
-        !handledActionLines.has(lineNumber) &&
+        !handledMarkerLines.has(lineNumber) &&
         !isStandaloneCommentLine(line)
       ) {
         continue;
@@ -129,30 +101,18 @@ function removeHandledMarkerBlocksFromContent(
   content: string,
   currentMarkers: ParsedAiMarker[],
   handledMarkerIds: ReadonlySet<string>,
-  removeContextAnchorsInActionBlock: boolean,
 ): string {
-  const handledActionMarkers = currentMarkers.filter(
-    (marker) =>
-      marker.action !== "context" &&
-      handledMarkerIds.has(createMarkerIntentId(marker)),
+  const handledMarkers = currentMarkers.filter((marker) =>
+    handledMarkerIds.has(createMarkerIntentId(marker)),
   );
 
-  if (handledActionMarkers.length === 0) {
+  if (handledMarkers.length === 0) {
     return content;
   }
 
   const lines = content.split(/\r\n|\n|\r/);
   const lineEnding = content.match(/\r\n|\n|\r/)?.[0] ?? "\n";
-  const preservedContextLines = collectPreservedContextLines(
-    currentMarkers,
-    handledMarkerIds,
-    removeContextAnchorsInActionBlock,
-  );
-  const linesToClean = collectLinesToClean(
-    lines,
-    handledActionMarkers,
-    preservedContextLines,
-  );
+  const linesToClean = collectLinesToClean(lines, handledMarkers);
 
   const output: string[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -170,16 +130,26 @@ function removeHandledMarkerBlocksFromContent(
   return output.join(lineEnding);
 }
 
-export function cleanupHandledActionComments(
+function collectCompletedMarkerIds(
+  completed: CompletedWatcherBatch,
+): Set<string> {
+  return new Set(
+    completed.batch.files
+      .flatMap((file) => file.markers)
+      .map((marker) => createMarkerIntentId(marker)),
+  );
+}
+
+export function cleanupHandledMarkerComments(
   cwd: string,
   completed: CompletedWatcherBatch | null,
   config: CleanupConfig,
 ): void {
-  if (!config.removeHandledActionComments || !completed) {
+  if (!config.removeHandledMarkerComments || !completed) {
     return;
   }
 
-  const handledMarkerIds = new Set(completed.markerIds);
+  const handledMarkerIds = collectCompletedMarkerIds(completed);
   if (handledMarkerIds.size === 0) {
     return;
   }
@@ -205,7 +175,6 @@ export function cleanupHandledActionComments(
       content,
       currentMarkers,
       handledMarkerIds,
-      config.removeContextAnchorsInActionBlock,
     );
 
     if (nextContent === content) {

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { cleanupHandledActionComments } from "./cleanup";
+import { cleanupHandledMarkerComments } from "./cleanup";
 import {
   type WatcherAgentContext,
   WatcherRouter,
@@ -39,8 +39,7 @@ export interface WatcherConfig {
   contextLines?: number;
   maxPromptBytes?: number;
   marker?: string;
-  removeHandledActionComments?: boolean;
-  removeContextAnchorsInActionBlock?: boolean;
+  removeHandledMarkerComments?: boolean;
   busyPolicy?: WatcherBusyPolicy;
 }
 
@@ -105,16 +104,14 @@ export const DEFAULT_CONFIG: EffectiveWatcherConfig = {
   contextLines: 12,
   maxPromptBytes: 60_000,
   marker: "AI",
-  removeHandledActionComments: true,
-  removeContextAnchorsInActionBlock: false,
+  removeHandledMarkerComments: true,
   busyPolicy: "queue_until_idle",
 };
 
 const BOOLEAN_CONFIG_KEYS = [
   "enabled",
   "scanOnStart",
-  "removeHandledActionComments",
-  "removeContextAnchorsInActionBlock",
+  "removeHandledMarkerComments",
 ] as const;
 const NUMBER_CONFIG_KEYS = [
   "maxFileBytes",
@@ -587,7 +584,7 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_end", async (_event, ctx) => {
     const result = router.handleAgentEnd(ctx);
-    cleanupHandledActionComments(
+    cleanupHandledMarkerComments(
       ctx.cwd,
       result.completed ?? null,
       loadEffectiveConfig(ctx.cwd),

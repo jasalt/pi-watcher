@@ -47,7 +47,7 @@ Marker behavior:
 
 - `AI!`: edit request. Prompt tells pi to use normal read/edit/write tools; watcher removes handled trigger comment blocks after the run.
 - `AI?`: question. Prompt tells pi to answer without editing unless comment explicitly asks for edits; watcher removes handled question comments after the run.
-- `AI.`: context anchor. Included with next actionable `AI!` or `AI?` batch, but does not trigger a turn alone.
+- `AI.`: context anchor. Included with next actionable `AI!` or `AI?` batch, but does not trigger a turn alone; watcher removes handled context anchors after the run when cleanup is enabled.
 
 ## Commands
 
@@ -100,8 +100,7 @@ Default config:
   "contextLines": 12,
   "maxPromptBytes": 60000,
   "marker": "AI",
-  "removeHandledActionComments": true,
-  "removeContextAnchorsInActionBlock": false,
+  "removeHandledMarkerComments": true,
   "busyPolicy": "queue_until_idle"
 }
 ```
@@ -119,9 +118,9 @@ Example project override:
 
 ## Loop prevention
 
-After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent and, by default, removes handled `AI!`/`AI?` trigger comment blocks when the agent turn ends. Inline trigger comments are stripped while preserving code before the comment. `AI.` context anchors are preserved unless `removeContextAnchorsInActionBlock` is enabled.
+After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent and, by default, removes handled `AI!`, `AI?`, and related `AI.` context-anchor comments when the agent turn ends. Inline marker comments are stripped while preserving code before the comment.
 
-If cleanup is disabled or pi leaves the same `AI!` or `AI?` comment in place, the watcher suppresses repeat dispatches. Change the comment text or run `/watcher retry` to dispatch it again.
+If cleanup is disabled or pi leaves the same handled marker comments in place, the watcher suppresses repeat dispatches. Change the comment text or run `/watcher retry` to dispatch them again.
 
 ## Risks and limits
 

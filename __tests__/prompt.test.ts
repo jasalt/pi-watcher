@@ -36,8 +36,7 @@ describe("buildWatcherPrompt", () => {
       "You are responding to pi-watcher comments the user added in their editor.
       Treat comments marked AI! as targeted code-change requests.
       Use read/edit/write tools as needed. Keep changes focused.
-      After completing requested changes, remove handled AI! comments.
-      Do not remove \`AI.\` context anchors unless they are part of the handled block.
+      After completing requested changes, remove handled AI!, AI?, and AI. comments.
       This is a pi-watcher fast-path turn: make the smallest useful edit directly; skip large task workflow unless the marked request clearly requires it.
 
       Marked comments:
@@ -115,8 +114,7 @@ describe("buildWatcherPrompt", () => {
       "You are responding to pi-watcher comments the user added in their editor.
       Treat comments marked AI! as targeted code-change requests.
       Use read/edit/write tools as needed. Keep changes focused.
-      After completing requested changes, remove handled AI! comments.
-      Do not remove \`AI.\` context anchors unless they are part of the handled block.
+      After completing requested changes, remove handled AI!, AI?, and AI. comments.
       This is a pi-watcher fast-path turn: make the smallest useful edit directly; skip large task workflow unless the marked request clearly requires it.
 
       Marked comments:

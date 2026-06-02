@@ -186,9 +186,12 @@ describe("pi-watcher scaffold", () => {
       enabled: true,
       maxFileBytes: 1_048_576,
       marker: "AI",
+      removeHandledMarkerComments: true,
       roots: ["."],
       scanOnStart: true,
     });
+    expect("removeHandledActionComments" in DEFAULT_CONFIG).toBe(false);
+    expect("removeContextAnchorsInActionBlock" in DEFAULT_CONFIG).toBe(false);
     expect(resolveEffectiveConfig()).toMatchObject(DEFAULT_CONFIG);
   });
 
@@ -367,12 +370,7 @@ describe("pi-watcher scaffold", () => {
       await harness.emit("agent_end", ctx);
 
       expect(readFileSync(path, "utf-8")).toBe(
-        [
-          "// keep nearby context AI.",
-          "export const value = compute();",
-          "run();",
-          "",
-        ].join("\n"),
+        ["export const value = compute();", "run();", ""].join("\n"),
       );
     } finally {
       await harness.emit("session_shutdown", ctx);
@@ -400,16 +398,19 @@ describe("pi-watcher scaffold", () => {
     }
   });
 
-  it("keeps handled trigger comments when cleanup config is disabled", async () => {
+  it("keeps handled marker comments when cleanup config is disabled", async () => {
     const cwd = makeTempProject();
     const path = join(cwd, "cleanup-disabled.ts");
     writeProjectConfig(cwd, {
       debounceMs: 20,
       enabled: true,
-      removeHandledActionComments: false,
+      removeHandledMarkerComments: false,
       scanOnStart: false,
     });
-    writeFileSync(path, "// add guard AI!\nrun();\n");
+    writeFileSync(
+      path,
+      "// keep context AI.\n// add guard AI!\n# why AI?\nrun();\n",
+    );
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
@@ -419,22 +420,24 @@ describe("pi-watcher scaffold", () => {
 
       await harness.emit("agent_end", ctx);
 
-      expect(readFileSync(path, "utf-8")).toBe("// add guard AI!\nrun();\n");
+      expect(readFileSync(path, "utf-8")).toBe(
+        "// keep context AI.\n// add guard AI!\n# why AI?\nrun();\n",
+      );
     } finally {
       await harness.emit("session_shutdown", ctx);
     }
   });
 
-  it("removes context anchors in handled blocks when configured", async () => {
+  it("removes handled AI. context anchors by default", async () => {
     const cwd = makeTempProject();
-    const path = join(cwd, "cleanup-context.ts");
-    writeProjectConfig(cwd, {
-      debounceMs: 20,
-      enabled: true,
-      removeContextAnchorsInActionBlock: true,
-      scanOnStart: false,
-    });
-    writeFileSync(path, "// keep this context AI.\n// add guard AI!\nrun();\n");
+    const contextPath = join(cwd, "cleanup-context.ts");
+    const actionPath = join(cwd, "cleanup-action.ts");
+    writeLiveProjectConfig(cwd);
+    writeFileSync(
+      contextPath,
+      "const context = true; // keep this context AI.\n",
+    );
+    writeFileSync(actionPath, "// add guard AI!\nrun();\n");
     const harness = createExtensionHarness();
     const { ctx } = createMockContext(cwd);
 
@@ -444,7 +447,10 @@ describe("pi-watcher scaffold", () => {
 
       await harness.emit("agent_end", ctx);
 
-      expect(readFileSync(path, "utf-8")).toBe("run();\n");
+      expect(readFileSync(contextPath, "utf-8")).toBe(
+        "const context = true;\n",
+      );
+      expect(readFileSync(actionPath, "utf-8")).toBe("run();\n");
     } finally {
       await harness.emit("session_shutdown", ctx);
     }
