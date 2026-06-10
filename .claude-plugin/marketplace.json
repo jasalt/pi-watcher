@@ -1,0 +1,18 @@
+{
+  "name": "pi-watcher",
+  "owner": {
+    "name": "Vedang Manerikar",
+    "url": "https://github.com/vedang"
+  },
+  "metadata": {
+    "description": "Editor comment watch mode for coding agents."
+  },
+  "plugins": [
+    {
+      "name": "watcher",
+      "source": "./",
+      "description": "Watch source files for AI!/AI?/AI. marker comments and surface them in the session (plugin-monitor port of the pi-watcher extension).",
+      "category": "productivity"
+    }
+  ]
+}

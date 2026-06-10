@@ -1,0 +1,7 @@
+[
+  {
+    "name": "ai-markers",
+    "command": "node \"${CLAUDE_PLUGIN_ROOT}\"/monitors/watch-markers.mjs \"${CLAUDE_PROJECT_DIR}\"",
+    "description": "AI!/AI?/AI. marker comments appearing in source files"
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "name": "watcher",
+  "version": "0.1.0",
+  "description": "Editor comment watch mode: surfaces AI!/AI?/AI. marker comments from source files into the session as notifications.",
+  "author": {
+    "name": "Vedang Manerikar",
+    "url": "https://github.com/vedang"
+  },
+  "homepage": "https://github.com/vedang/pi-watcher",
+  "license": "MIT"
+}
