@@ -344,7 +344,7 @@ describe("pi-watcher scaffold", () => {
     }
   });
 
-  it("removes handled AI! trigger comment blocks after agent_end", async () => {
+  it("removes handled AI! trigger comment blocks after agent_settled", async () => {
     const cwd = makeTempProject();
     const path = join(cwd, "cleanup.ts");
     writeLiveProjectConfig(cwd);
@@ -368,7 +368,9 @@ describe("pi-watcher scaffold", () => {
       expect(harness.sent).toHaveLength(1);
 
       await harness.emit("agent_end", ctx);
+      expect(readFileSync(path, "utf-8")).toContain("add guard AI!");
 
+      await harness.emit("agent_settled", ctx);
       expect(readFileSync(path, "utf-8")).toBe(
         ["export const value = compute();", "run();", ""].join("\n"),
       );
@@ -377,7 +379,7 @@ describe("pi-watcher scaffold", () => {
     }
   });
 
-  it("removes handled AI? trigger comments after agent_end", async () => {
+  it("removes handled AI? trigger comments after agent_settled", async () => {
     const cwd = makeTempProject();
     const path = join(cwd, "cleanup-question.py");
     writeLiveProjectConfig(cwd);
@@ -390,7 +392,7 @@ describe("pi-watcher scaffold", () => {
       expect(harness.sent).toHaveLength(1);
       expect(harness.sent[0]).toContain("cleanup-question.py:1 action=ask");
 
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(path, "utf-8")).toBe("value = 1\n");
     } finally {
@@ -418,7 +420,7 @@ describe("pi-watcher scaffold", () => {
       await harness.command.handler("scan", ctx);
       expect(harness.sent).toHaveLength(1);
 
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(path, "utf-8")).toBe(
         "// keep context AI.\n// add guard AI!\n# why AI?\nrun();\n",
@@ -445,7 +447,7 @@ describe("pi-watcher scaffold", () => {
       await harness.command.handler("scan", ctx);
       expect(harness.sent).toHaveLength(1);
 
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(contextPath, "utf-8")).toBe(
         "const context = true;\n",
@@ -471,7 +473,7 @@ describe("pi-watcher scaffold", () => {
       await harness.command.handler("scan", ctx);
       expect(harness.sent).toHaveLength(1);
 
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(path, "utf-8")).toBe(
         "const a = 1;\nconst b = 2; // keep this note\n",
@@ -498,7 +500,7 @@ describe("pi-watcher scaffold", () => {
 
       rmSync(path);
       symlinkSync(outsidePath, path);
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(outsidePath, "utf-8")).toBe(
         "// add guard AI!\nrun();\n",
@@ -527,7 +529,7 @@ describe("pi-watcher scaffold", () => {
 
       rmSync(nestedDir, { recursive: true });
       symlinkSync(outside, nestedDir);
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
 
       expect(readFileSync(outsidePath, "utf-8")).toBe(
         "// add guard AI!\nrun();\n",
@@ -537,7 +539,7 @@ describe("pi-watcher scaffold", () => {
     }
   });
 
-  it("does not repeat an unchanged AI! comment after agent_end even if nearby code changes", async () => {
+  it("does not repeat an unchanged AI! comment after agent_settled even if nearby code changes", async () => {
     const cwd = makeTempProject();
     const path = join(cwd, "loop.ts");
     writeLiveProjectConfig(cwd);
@@ -549,7 +551,7 @@ describe("pi-watcher scaffold", () => {
       writeFileSync(path, "// add guard AI!\nexport const value = 1;\n");
       await waitFor(() => harness.sent.length === 1);
 
-      await harness.emit("agent_end", ctx);
+      await harness.emit("agent_settled", ctx);
       writeFileSync(
         path,
         "// add guard AI!\nexport const value = 2;\nexport const other = 3;\n",

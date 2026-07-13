@@ -64,7 +64,7 @@ describe("WatcherRouter", () => {
     });
   });
 
-  it("queues while pi is busy and dispatches after agent_end", () => {
+  it("queues while pi is busy and dispatches after agent_settled", () => {
     const harness = createRouterHarness({ idle: false });
     const batch = batchFor("src/job.ts", "// add retries AI!\nrun();");
 
@@ -74,7 +74,7 @@ describe("WatcherRouter", () => {
     expect(harness.sent).toHaveLength(0);
 
     harness.setIdle(true);
-    expect(harness.router.handleAgentEnd(harness.ctx).status).toBe(
+    expect(harness.router.handleAgentSettled(harness.ctx).status).toBe(
       "dispatched",
     );
     expect(harness.sent).toHaveLength(1);
@@ -85,7 +85,9 @@ describe("WatcherRouter", () => {
     const batch = batchFor("src/job.ts", "// add retries AI!\nrun();");
 
     harness.router.enqueueBatch(batch, harness.ctx);
-    expect(harness.router.handleAgentEnd(harness.ctx).status).toBe("completed");
+    expect(harness.router.handleAgentSettled(harness.ctx).status).toBe(
+      "completed",
+    );
     expect(harness.router.getSnapshot()).toMatchObject({
       processedMarkerCount: 1,
       status: "watching",
@@ -102,7 +104,7 @@ describe("WatcherRouter", () => {
     const batch = batchFor("src/job.ts", "// add retries AI!\nrun();");
 
     harness.router.enqueueBatch(batch, harness.ctx);
-    harness.router.handleAgentEnd(harness.ctx);
+    harness.router.handleAgentSettled(harness.ctx);
 
     const retry = harness.router.retryLast(harness.ctx, { contextLines: 0 });
 

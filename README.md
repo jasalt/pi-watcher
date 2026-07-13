@@ -29,7 +29,7 @@ No `--watch` flag is needed. If the extension is installed and config does not d
 
 3. Save the file.
 4. pi receives a user message with file path, line number, and surrounding snippet.
-5. For `AI!`, pi should make focused edits. After the agent turn ends, `pi-watcher` removes the handled trigger comments by default.
+5. For `AI!`, pi should make focused edits. After the agent fully settles, `pi-watcher` removes the handled trigger comments by default.
 
 ## Marker syntax
 
@@ -118,7 +118,7 @@ Example project override:
 
 ## Loop prevention
 
-After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent and, by default, removes handled `AI!`, `AI?`, and related `AI.` context-anchor comments when the agent turn ends. Inline marker comments are stripped while preserving code before the comment.
+After pi dispatches an actionable marker, `pi-watcher` remembers the normalized comment intent and, by default, removes handled `AI!`, `AI?`, and related `AI.` context-anchor comments when the agent fully settles, including any automatic retry, compaction retry, or queued continuation. Inline marker comments are stripped while preserving code before the comment.
 
 If cleanup is disabled or pi leaves the same handled marker comments in place, the watcher suppresses repeat dispatches. Change the comment text or run `/watcher retry` to dispatch them again.
 

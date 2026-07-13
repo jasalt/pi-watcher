@@ -117,7 +117,7 @@ export class WatcherRouter {
     return { status: "queued" };
   }
 
-  handleAgentEnd(context: WatcherAgentContext): WatcherRouterResult {
+  handleAgentSettled(context: WatcherAgentContext): WatcherRouterResult {
     const completed = completeInFlightBatch(this.state);
 
     if (completed) {

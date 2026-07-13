@@ -7,7 +7,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { cleanupHandledMarkerComments } from "./cleanup";
 import {
   type WatcherAgentContext,
@@ -143,7 +146,7 @@ export function getProjectConfigPath(cwd: string): {
   dir: string;
   path: string;
 } {
-  const dir = join(cwd, ".pi", "extensions");
+  const dir = join(cwd, CONFIG_DIR_NAME, "extensions");
   return { dir, path: join(dir, "pi-watcher.json") };
 }
 
@@ -582,8 +585,8 @@ export default function piWatcherExtension(pi: ExtensionAPI): void {
     refreshUi(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
-    const result = router.handleAgentEnd(ctx);
+  pi.on("agent_settled", async (_event, ctx) => {
+    const result = router.handleAgentSettled(ctx);
     cleanupHandledMarkerComments(
       ctx.cwd,
       result.completed ?? null,
